@@ -11,6 +11,7 @@
 
 import SwiftUI
 import SwiftData
+import os
 
 struct RoutineListView: View {
     
@@ -197,7 +198,7 @@ struct RoutineListView: View {
                         get: { routine.isActive },
                         set: { newValue in
                             routine.isActive = newValue
-                            try? modelContext.save()
+                            do { try modelContext.save() } catch { Log.ui.error("[Routine] Toggle save failed: \(error, privacy: .public)") }
                             HapticService.shared.actionButtonTap()
                         }
                     ))
@@ -260,7 +261,7 @@ struct RoutineListView: View {
             
             Button {
                 routine.isActive.toggle()
-                try? modelContext.save()
+                do { try modelContext.save() } catch { Log.ui.error("[Routine] Toggle save failed: \(error, privacy: .public)") }
             } label: {
                 Label(
                     routine.isActive ? String(localized: "Pause") : String(localized: "Resume"),
@@ -272,7 +273,7 @@ struct RoutineListView: View {
             
             Button(role: .destructive) {
                 modelContext.delete(routine)
-                try? modelContext.save()
+                do { try modelContext.save() } catch { Log.ui.error("[Routine] Delete save failed: \(error, privacy: .public)") }
                 HapticService.shared.actionButtonTap()
             } label: {
                 Label(String(localized: "Delete"), systemImage: "trash")

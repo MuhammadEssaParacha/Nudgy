@@ -27,6 +27,8 @@ struct NudgeActivityAttributes: ActivityAttributes {
         var timeOfDayIndex: Int     // 0-4 for gradient strip
         var taskID: String          // Item UUID for deep link actions
         var startedAt: Date         // When this task became active (for live timer)
+        var categoryLabel: String?  // Category name for lock screen chip
+        var categoryColorHex: String? // Category accent color
     }
     
     /// Fixed at activity start
@@ -83,8 +85,10 @@ final class LiveActivityManager {
         queuePosition: Int,
         queueTotal: Int,
         accentHex: String,
-        taskID: String = ""
-    ) {
+        taskID: String = "",
+        categoryLabel: String? = nil,
+        categoryColorHex: String? = nil
+    ) async {
         liveActivityLog.info("start() called — task: \(taskContent), taskID: \(taskID)")
         liveActivityLog.info("areActivitiesEnabled: \(ActivityAuthorizationInfo().areActivitiesEnabled)")
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -92,8 +96,9 @@ final class LiveActivityManager {
             return
         }
         
-        // End any existing activity first
-        Task { await endAll() }
+        // End any existing activity first — MUST await to prevent race condition
+        // where endAll() kills the newly created activity
+        await endAll()
         
         let now = Date.now
         let attributes = NudgeActivityAttributes(startedAt: now)
@@ -105,7 +110,9 @@ final class LiveActivityManager {
             accentColorHex: accentHex,
             timeOfDayIndex: TimeOfDay.current().rawValue,
             taskID: taskID,
-            startedAt: now
+            startedAt: now,
+            categoryLabel: categoryLabel,
+            categoryColorHex: categoryColorHex
         )
         
         let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(7.5 * 3600))
@@ -132,7 +139,9 @@ final class LiveActivityManager {
         queuePosition: Int,
         queueTotal: Int,
         accentHex: String,
-        taskID: String = ""
+        taskID: String = "",
+        categoryLabel: String? = nil,
+        categoryColorHex: String? = nil
     ) async {
         guard let activity = currentActivity else { return }
         
@@ -148,7 +157,9 @@ final class LiveActivityManager {
             accentColorHex: accentHex,
             timeOfDayIndex: TimeOfDay.current().rawValue,
             taskID: taskID,
-            startedAt: timerStart
+            startedAt: timerStart,
+            categoryLabel: categoryLabel,
+            categoryColorHex: categoryColorHex
         )
         
         let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(7.5 * 3600))
@@ -184,114 +195,6 @@ final class LiveActivityManager {
     }
 }
 
-// MARK: - Live Activity Widget Views
-
-/// Lock Screen presentation of the Live Activity.
-struct NudgeLockScreenView: View {
-    let state: NudgeActivityAttributes.ContentState
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            // Time-of-day gradient strip
-            HStack(spacing: 2) {
-                ForEach(TimeOfDay.allCases, id: \.rawValue) { timeOfDay in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(timeOfDay.color)
-                        .frame(height: 4)
-                        .opacity(timeOfDay.rawValue == state.timeOfDayIndex ? 1.0 : 0.3)
-                }
-            }
-            .padding(.horizontal, 16)
-            
-            // Task content + live timer
-            HStack(spacing: 12) {
-                Image(systemName: TaskIconResolver.resolveSymbol(for: state.taskEmoji))
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(Color(hex: state.accentColorHex))
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(state.taskContent)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                    
-                    HStack(spacing: 8) {
-                        Text("\(state.queuePosition) of \(state.queueTotal)")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                        
-                        HStack(spacing: 3) {
-                            Image(systemName: "timer")
-                                .font(.system(size: 10))
-                            Text(state.startedAt, style: .timer)
-                                .font(.system(size: 12, design: .monospaced))
-                                .monospacedDigit()
-                        }
-                        .foregroundStyle(Color(hex: state.accentColorHex))
-                    }
-                }
-                
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-        }
-        .activityBackgroundTint(Color.black)
-    }
-}
-
-/// Compact Dynamic Island view.
-struct NudgeCompactLeadingView: View {
-    let state: NudgeActivityAttributes.ContentState
-    
-    var body: some View {
-        Image(systemName: TaskIconResolver.resolveSymbol(for: state.taskEmoji))
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.white)
-    }
-}
-
-struct NudgeCompactTrailingView: View {
-    let state: NudgeActivityAttributes.ContentState
-    
-    var body: some View {
-        Text(state.taskContent)
-            .font(.system(size: 12, weight: .medium))
-            .lineLimit(1)
-            .foregroundStyle(.white)
-    }
-}
-
-/// Expanded Dynamic Island view.
-struct NudgeExpandedView: View {
-    let state: NudgeActivityAttributes.ContentState
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: TaskIconResolver.resolveSymbol(for: state.taskEmoji))
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color(hex: state.accentColorHex))
-                
-                Text(state.taskContent)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                
-                Spacer()
-            }
-            
-            // Time strip
-            HStack(spacing: 2) {
-                ForEach(TimeOfDay.allCases, id: \.rawValue) { timeOfDay in
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(timeOfDay.color)
-                        .frame(height: 3)
-                        .opacity(timeOfDay.rawValue == state.timeOfDayIndex ? 1.0 : 0.25)
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-    }
-}
+// NOTE: Live Activity views are rendered by the NudgeWidgetExtension target.
+// See NudgeWidgetExtension/NudgeLiveActivityWidget.swift for the actual
+// Dynamic Island and Lock Screen Live Activity views.

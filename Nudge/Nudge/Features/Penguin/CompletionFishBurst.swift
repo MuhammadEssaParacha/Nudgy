@@ -42,8 +42,8 @@ struct CompletionFishBurst: View {
     @State private var isActive = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // Burst color palette — same as intro
-    private static let burstColors: [(Color, Color)] = [
+    // Burst color palette — default (used when no category provided)
+    private static let defaultBurstColors: [(Color, Color)] = [
         (Color(hex: "4FC3F7"), Color(hex: "0288D1")),   // Blue
         (Color(hex: "FF8A65"), Color(hex: "E64A19")),   // Orange
         (Color(hex: "81C784"), Color(hex: "388E3C")),   // Green
@@ -53,6 +53,26 @@ struct CompletionFishBurst: View {
         (Color(hex: "FF8A65"), Color(hex: "E64A19")),   // Orange (repeat)
         (Color(hex: "81C784"), Color(hex: "388E3C")),   // Green (repeat)
     ]
+    
+    /// Generate a burst palette from a TaskCategory's gradient colors.
+    /// Creates variations by adjusting brightness and saturation for visual variety.
+    private static func categoryBurstColors(for category: TaskCategory) -> [(Color, Color)] {
+        guard category != .general else { return defaultBurstColors }
+        let primary = category.gradientColors[0]
+        let secondary = category.gradientColors.count > 1 ? category.gradientColors[1] : primary
+        
+        // Generate 8 color pairs by varying the category colors
+        return [
+            (primary, secondary),
+            (secondary, primary),
+            (primary.opacity(0.9), secondary),
+            (Color(hex: "FFD54F"), Color(hex: "F57F17")),   // Gold accent for celebration
+            (primary, secondary.opacity(0.8)),
+            (secondary.opacity(0.9), primary),
+            (primary.opacity(0.85), secondary),
+            (Color(hex: "FFD54F"), primary),                 // Gold + category blend
+        ]
+    }
 
     var body: some View {
         ZStack {
@@ -71,13 +91,15 @@ struct CompletionFishBurst: View {
                   let origin = info["origin"] as? CGPoint,
                   let hudPos = info["hudPosition"] as? CGPoint,
                   let count = info["fishCount"] as? Int else { return }
-            trigger(from: origin, hudPosition: hudPos, fishCount: count)
+            let categoryRaw = info["categoryRaw"] as? String
+            let category = categoryRaw.flatMap { TaskCategory(rawValue: $0) }
+            trigger(from: origin, hudPosition: hudPos, fishCount: count, category: category)
         }
     }
 
     // MARK: - Trigger Burst
 
-    func trigger(from origin: CGPoint, hudPosition: CGPoint, fishCount: Int) {
+    func trigger(from origin: CGPoint, hudPosition: CGPoint, fishCount: Int, category: TaskCategory? = nil) {
         guard !isActive else { return }
         guard !reduceMotion else {
             // Still spawn flying fish for the reward, just skip the burst
@@ -91,6 +113,13 @@ struct CompletionFishBurst: View {
 
         isActive = true
         HapticService.shared.swipeDone()
+        
+        // Use category-specific burst colors when available
+        let burstPalette: [(Color, Color)] = if let category {
+            Self.categoryBurstColors(for: category)
+        } else {
+            Self.defaultBurstColors
+        }
 
         // Stage 1: Create 8 burst particles in a semicircular arc
         let burstCount = 8
@@ -101,7 +130,7 @@ struct CompletionFishBurst: View {
             let radius: CGFloat = CGFloat.random(in: 80...140)
             let targetX = origin.x + cos(angle) * radius
             let targetY = origin.y + sin(angle) * radius
-            let colors = Self.burstColors[i % Self.burstColors.count]
+            let colors = burstPalette[i % burstPalette.count]
 
             newParticles.append(BurstFishParticle(
                 x: origin.x,
@@ -123,7 +152,8 @@ struct CompletionFishBurst: View {
         // Stage 1: Spring pop outward
         for i in particles.indices {
             let delay = particles[i].delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(delay))
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
                     particles[i].x = particles[i].targetX
                     particles[i].y = particles[i].targetY
@@ -133,8 +163,10 @@ struct CompletionFishBurst: View {
             }
         }
 
-        // Stage 1b: Gravity drift + fade
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Stage 1b → Stage 2 → Cleanup as sequential Task
+        Task { @MainActor in
+            // Stage 1b: Gravity drift + fade
+            try? await Task.sleep(for: .seconds(0.5))
             for i in particles.indices {
                 withAnimation(.easeIn(duration: 0.5)) {
                     particles[i].x += particles[i].driftX
@@ -143,19 +175,17 @@ struct CompletionFishBurst: View {
                     particles[i].scale = 0.6
                 }
             }
-        }
 
-        // Stage 2: After burst clears, spawn golden fly-to-HUD fish
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            // Stage 2: After burst clears, spawn golden fly-to-HUD fish
+            try? await Task.sleep(for: .seconds(0.3))
             FishRewardEngine.shared.spawnFish(
                 count: min(fishCount, 8),
                 from: origin,
                 to: hudPosition
             )
-        }
 
-        // Cleanup
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            // Cleanup
+            try? await Task.sleep(for: .seconds(0.7))
             particles.removeAll()
             isActive = false
         }

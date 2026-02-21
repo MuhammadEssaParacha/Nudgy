@@ -104,8 +104,9 @@ struct NudgyPeekMunch: View {
                 
                 // Heart when munching
                 if showHeart {
-                    Text("❤️")
-                        .font(.system(size: 12))
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.pink)
                         .offset(x: 25, y: -25)
                         .transition(.scale.combined(with: .opacity))
                 }

@@ -2,7 +2,7 @@
 //  RewardService.swift
 //  Nudge
 //
-//  Manages the reward loop: earning snowflakes, unlocking accessories,
+//  Manages the reward loop: earning fish, unlocking accessories,
 //  tracking streaks, and updating environment mood.
 //
 //  Singleton via RewardService.shared. Requires a ModelContext to operate
@@ -16,24 +16,25 @@
 
 import SwiftData
 import SwiftUI
+import os
 
 // MARK: - Reward Constants
 
 nonisolated enum RewardConstants {
-    /// Snowflakes earned per task completed.
-    static let snowflakesPerTask: Int = 2
+    /// Fish earned per task completed.
+    static let fishPerTask: Int = 2
     
-    /// Bonus snowflakes for clearing ALL tasks.
+    /// Bonus fish for clearing ALL tasks.
     static let allClearBonus: Int = 5
     
     /// Streak multiplier kicks in at this many consecutive days.
     static let streakMultiplierThreshold: Int = 3
     
-    /// Streak multiplier: 2× snowflakes after 3+ day streak.
+    /// Streak multiplier: 2× fish after 3+ day streak.
     static let streakMultiplier: Int = 2
     
-    /// Notification posted when snowflakes change (for UI refresh).
-    static let snowflakesChangedNotification = Notification.Name("nudgeSnowflakesChanged")
+    /// Notification posted when fish count changes (for UI refresh).
+    static let fishChangedNotification = Notification.Name("nudgeFishChanged")
     
     /// Notification posted when an accessory is unlocked.
     static let accessoryUnlockedNotification = Notification.Name("nudgeAccessoryUnlocked")
@@ -45,9 +46,9 @@ nonisolated enum RewardConstants {
 // MARK: - Unlock Result
 
 enum UnlockResult {
-    case success(accessoryID: String, remainingSnowflakes: Int)
+    case success(accessoryID: String, remainingFish: Int)
     case alreadyUnlocked
-    case insufficientSnowflakes(have: Int, need: Int)
+    case insufficientFish(have: Int, need: Int)
     case notFound
 }
 
@@ -60,8 +61,8 @@ final class RewardService {
     
     // MARK: - Published State (for UI binding)
     
-    /// Current snowflake count (mirrors wardrobe, updated on every mutation).
-    private(set) var snowflakes: Int = 0
+    /// Current fish count (mirrors wardrobe, updated on every mutation).
+    private(set) var fish: Int = 0
     
     /// Currently equipped accessory IDs (mirrors wardrobe).
     private(set) var equippedAccessories: Set<String> = []
@@ -98,6 +99,23 @@ final class RewardService {
     
     /// Fish catches (for aquarium display).
     private(set) var fishCatches: [FishCatch] = []
+
+    /// Total catches per species (drives evolution stage).
+    private(set) var catchCountsPerSpecies: [String: Int] = [:]
+
+    /// Set when a fish just evolved — consumed by the celebration overlay.
+    private(set) var pendingEvolution: (species: FishSpecies, stage: FishEvolutionStage)? = nil
+    
+    // MARK: - Private Helpers
+    
+    /// Save context with error logging — never silently swallow data loss.
+    private func safeSave(_ context: ModelContext, label: String = "RewardService") {
+        do {
+            try context.save()
+        } catch {
+            Log.services.error("[\(label)] Failed to save: \(error, privacy: .public)")
+        }
+    }
     
     /// The most recent fish catch (for animation).
     private(set) var lastFishCatch: FishCatch? = nil
@@ -142,9 +160,9 @@ final class RewardService {
     
     // MARK: - Task Completion Reward
     
-    /// Record a task completion — earn snowflakes, update streak, etc.
+    /// Record a task completion — earn fish, update streak, etc.
     /// Pass the completed item to earn species-appropriate fish.
-    /// Returns the number of snowflakes earned (for UI animation).
+    /// Returns the number of fish earned (for UI animation).
     @discardableResult
     func recordCompletion(context: ModelContext, item: NudgeItem? = nil, isAllClear: Bool = false) -> Int {
         let wardrobe = fetchOrCreateWardrobe(context: context)
@@ -152,7 +170,7 @@ final class RewardService {
         // Update streak
         updateStreak(wardrobe: wardrobe)
         
-        // Fish economy: determine species and snowflakes
+        // Fish economy: determine species and reward
         let species: FishSpecies
         if let item {
             species = FishEconomy.speciesForTask(item)
@@ -160,8 +178,8 @@ final class RewardService {
             species = .catfish
         }
         
-        // Calculate snowflakes via fish economy
-        var earned = FishEconomy.snowflakesForCatch(
+        // Calculate fish via fish economy
+        var earned = FishEconomy.fishForCatch(
             species: species,
             streak: wardrobe.currentStreak,
             isAllClear: isAllClear
@@ -176,11 +194,27 @@ final class RewardService {
             )
             wardrobe.addFishCatch(fishCatch)
             lastFishCatch = fishCatch
+
+            // Evolution check — increment count, check threshold crossing
+            let prevCount = (wardrobe.catchCounts[species.rawValue] ?? 0)
+            let newCount = wardrobe.incrementCatchCount(for: species)
+            let prevStage = FishEvolutionStage.stage(for: species, catchCount: prevCount)
+            let newStage  = FishEvolutionStage.stage(for: species, catchCount: newCount)
+            if newStage > prevStage {
+                let key = "\(species.rawValue):\(newStage.rawValue)"
+                if !wardrobe.celebratedEvolutions.contains(key) {
+                    var celebrated = wardrobe.celebratedEvolutions
+                    celebrated.insert(key)
+                    wardrobe.celebratedEvolutions = celebrated
+                    pendingEvolution = (species: species, stage: newStage)
+                    NotificationCenter.default.post(name: .nudgeFishEvolved, object: pendingEvolution)
+                }
+            }
         }
         
-        // Credit snowflakes
-        wardrobe.snowflakes += earned
-        wardrobe.lifetimeSnowflakes += earned
+        // Credit fish
+        wardrobe.fish += earned
+        wardrobe.lifetimeFish += earned
         wardrobe.totalTasksCompleted += 1
         wardrobe.tasksCompletedToday += 1
         
@@ -188,7 +222,7 @@ final class RewardService {
         let oldStage = StageTier.from(level: level)
         
         // Save and sync
-        try? context.save()
+        safeSave(context, label: "recordCompletion")
         syncState(from: wardrobe)
         
         // Check streak milestone bonus (3, 7, 14, 30 day rewards)
@@ -203,16 +237,16 @@ final class RewardService {
         }
         
         // Update daily challenges
-        updateChallengeProgress(tasksToday: wardrobe.tasksCompletedToday, isAllClear: isAllClear)
+        updateChallengeProgress(tasksToday: wardrobe.tasksCompletedToday, isAllClear: isAllClear, completedCategoryRaw: item?.categoryRaw)
         
-        NotificationCenter.default.post(name: RewardConstants.snowflakesChangedNotification, object: nil)
+        NotificationCenter.default.post(name: RewardConstants.fishChangedNotification, object: nil)
         
         return earned
     }
     
     // MARK: - Unlock Accessory
     
-    /// Attempt to unlock an accessory. Deducts snowflakes if successful.
+    /// Attempt to unlock an accessory. Deducts fish if successful.
     func unlock(accessoryID: String, context: ModelContext) -> UnlockResult {
         guard AccessoryCatalog.item(for: accessoryID) != nil else {
             return .notFound
@@ -228,17 +262,17 @@ final class RewardService {
         let cost = AccessoryCatalog.cost(for: accessoryID)
         
         // Can afford?
-        guard wardrobe.snowflakes >= cost else {
-            return .insufficientSnowflakes(have: wardrobe.snowflakes, need: cost)
+        guard wardrobe.fish >= cost else {
+            return .insufficientFish(have: wardrobe.fish, need: cost)
         }
         
         // Deduct and unlock
-        wardrobe.snowflakes -= cost
+        wardrobe.fish -= cost
         var unlocked = wardrobe.unlockedAccessories
         unlocked.insert(accessoryID)
         wardrobe.unlockedAccessories = unlocked
         
-        try? context.save()
+        safeSave(context, label: "unlockAccessory")
         syncState(from: wardrobe)
         
         NotificationCenter.default.post(
@@ -246,7 +280,7 @@ final class RewardService {
             object: accessoryID
         )
         
-        return .success(accessoryID: accessoryID, remainingSnowflakes: wardrobe.snowflakes)
+        return .success(accessoryID: accessoryID, remainingFish: wardrobe.fish)
     }
     
     // MARK: - Equip / Unequip
@@ -275,7 +309,7 @@ final class RewardService {
         }
         
         wardrobe.equippedAccessories = equipped
-        try? context.save()
+        safeSave(context, label: "equipAccessory")
         syncState(from: wardrobe)
     }
     
@@ -367,14 +401,14 @@ final class RewardService {
         // First launch — create wardrobe
         let wardrobe = NudgyWardrobe()
         context.insert(wardrobe)
-        try? context.save()
+        safeSave(context, label: "createWardrobe")
         return wardrobe
     }
     
     /// Sync observable state from the wardrobe model.
     /// Only writes properties that actually changed to avoid unnecessary view invalidations.
     private func syncState(from wardrobe: NudgyWardrobe) {
-        if snowflakes != wardrobe.snowflakes { snowflakes = wardrobe.snowflakes }
+        if fish != wardrobe.fish { fish = wardrobe.fish }
         if equippedAccessories != wardrobe.equippedAccessories { equippedAccessories = wardrobe.equippedAccessories }
         if unlockedAccessories != wardrobe.unlockedAccessories { unlockedAccessories = wardrobe.unlockedAccessories }
         if unlockedProps != wardrobe.unlockedProps { unlockedProps = wardrobe.unlockedProps }
@@ -384,6 +418,7 @@ final class RewardService {
         if tasksCompletedToday != wardrobe.tasksCompletedToday { tasksCompletedToday = wardrobe.tasksCompletedToday }
         if environmentMood != wardrobe.environmentMood { environmentMood = wardrobe.environmentMood }
         if fishCatches != wardrobe.fishCatches { fishCatches = wardrobe.fishCatches }
+        if catchCountsPerSpecies != wardrobe.catchCounts { catchCountsPerSpecies = wardrobe.catchCounts }
         if unlockedDecorations != wardrobe.unlockedDecorations { unlockedDecorations = wardrobe.unlockedDecorations }
         if placedDecorations != wardrobe.placedDecorations { placedDecorations = wardrobe.placedDecorations }
         if fishFedToday != wardrobe.fishFedToday { fishFedToday = wardrobe.fishFedToday }
@@ -396,8 +431,8 @@ final class RewardService {
     
     // MARK: - Feeding
     
-    /// Record a fish feeding. Awards snowflakes for feeding streaks.
-    /// Returns snowflakes earned from feeding bonus (0 if none).
+    /// Record a fish feeding. Awards bonus fish for feeding streaks.
+    /// Returns fish earned from feeding bonus (0 if none).
     @discardableResult
     func recordFeeding(context: ModelContext) -> Int {
         let wardrobe = fetchOrCreateWardrobe(context: context)
@@ -427,51 +462,51 @@ final class RewardService {
         wardrobe.lastFedDateRaw = .now
         wardrobe.longestFeedingStreak = max(wardrobe.longestFeedingStreak, wardrobe.feedingStreak)
         
-        // Streak bonus snowflakes
+        // Streak bonus fish
         var bonus = 0
         
         // First feed of the day: streak milestone bonus
         if wardrobe.fishFedToday == 1 {
             if wardrobe.feedingStreak >= 7 {
-                bonus = 5  // 7+ day feeding streak: +5 ❄️
+                bonus = 5  // 7+ day feeding streak: +5 🐟
             } else if wardrobe.feedingStreak >= 3 {
-                bonus = 2  // 3+ day feeding streak: +2 ❄️
+                bonus = 2  // 3+ day feeding streak: +2 🐟
             }
         }
         
         // Feed 3 times in a day bonus
         if wardrobe.fishFedToday == 3 {
-            bonus += 3  // Full belly bonus: +3 ❄️
+            bonus += 3  // Full belly bonus: +3 🐟
         }
         
         if bonus > 0 {
-            wardrobe.snowflakes += bonus
-            wardrobe.lifetimeSnowflakes += bonus
+            wardrobe.fish += bonus
+            wardrobe.lifetimeFish += bonus
         }
         
-        try? context.save()
+        safeSave(context, label: "feedFish")
         syncState(from: wardrobe)
         
         if bonus > 0 {
-            NotificationCenter.default.post(name: RewardConstants.snowflakesChangedNotification, object: nil)
+            NotificationCenter.default.post(name: RewardConstants.fishChangedNotification, object: nil)
         }
         
         return bonus
     }
     
-    /// Snowflake bonus description for current feeding streak.
+    /// Fish bonus description for current feeding streak.
     var feedingStreakBonusLabel: String? {
         if feedingStreak >= 7 {
-            return String(localized: "+5 ❄️ per day (7-day feeding streak!)")
+            return String(localized: "+5 per day (7-day feeding streak!)")
         } else if feedingStreak >= 3 {
-            return String(localized: "+2 ❄️ per day (3-day feeding streak)")
+            return String(localized: "+2 per day (3-day feeding streak)")
         }
         return nil
     }
     
-    // MARK: - Streak Snowflake Milestones
+    // MARK: - Streak Fish Milestones
     
-    /// Snowflakes bonus for task completion streak milestones.
+    /// Fish bonus for task completion streak milestones.
     /// Called after streak is updated in recordCompletion.
     func checkStreakMilestoneBonus(context: ModelContext) -> Int {
         let wardrobe = fetchOrCreateWardrobe(context: context)
@@ -488,9 +523,9 @@ final class RewardService {
         }
         
         if bonus > 0 {
-            wardrobe.snowflakes += bonus
-            wardrobe.lifetimeSnowflakes += bonus
-            try? context.save()
+            wardrobe.fish += bonus
+            wardrobe.lifetimeFish += bonus
+            safeSave(context, label: "streakMilestone")
             syncState(from: wardrobe)
         }
         
@@ -499,13 +534,13 @@ final class RewardService {
     
     // MARK: - Tank Decorations
     
-    /// Unlock a tank decoration by spending snowflakes.
+    /// Unlock a tank decoration by spending fish.
     func unlockDecoration(_ decoID: String, cost: Int, context: ModelContext) {
         let wardrobe = fetchOrCreateWardrobe(context: context)
-        guard wardrobe.snowflakes >= cost else { return }
+        guard wardrobe.fish >= cost else { return }
         guard !wardrobe.unlockedDecorations.contains(decoID) else { return }
         
-        wardrobe.snowflakes -= cost
+        wardrobe.fish -= cost
         var unlocked = wardrobe.unlockedDecorations
         unlocked.insert(decoID)
         wardrobe.unlockedDecorations = unlocked
@@ -515,7 +550,7 @@ final class RewardService {
         placed.insert(decoID)
         wardrobe.placedDecorations = placed
         
-        try? context.save()
+        safeSave(context, label: "unlockDecoration")
         syncState(from: wardrobe)
     }
     
@@ -529,7 +564,7 @@ final class RewardService {
             placed.insert(decoID)
         }
         wardrobe.placedDecorations = placed
-        try? context.save()
+        safeSave(context, label: "toggleDecoration")
         syncState(from: wardrobe)
     }
     
@@ -539,6 +574,11 @@ final class RewardService {
     func acknowledgeStageUp() {
         pendingStageUp = nil
     }
+
+    /// Acknowledge the fish evolution celebration was shown.
+    func acknowledgePendingEvolution() {
+        pendingEvolution = nil
+    }
     
     // MARK: - Daily Challenges
     
@@ -547,16 +587,27 @@ final class RewardService {
         let today = Calendar.current.startOfDay(for: .now)
         
         if challengeDate != today {
+            // Phase 10: Determine top active category for category challenges
+            var topCat: TaskCategory? = nil
+            if let container = IntentModelAccess.makeContainer() {
+                let context = container.mainContext
+                let repo = NudgeRepository(modelContext: context)
+                let active = repo.fetchActiveQueue()
+                let catCounts = Dictionary(grouping: active, by: { $0.resolvedCategory }).mapValues(\.count)
+                topCat = catCounts.filter({ $0.key != .general }).max(by: { $0.value < $1.value })?.key
+            }
+            
             dailyChallenges = ChallengeGenerator.generateDaily(
                 level: level,
-                streak: currentStreak
+                streak: currentStreak,
+                topCategory: topCat
             )
             challengeDate = today
         }
     }
     
     /// Update challenge progress after a task completion.
-    private func updateChallengeProgress(tasksToday: Int, isAllClear: Bool) {
+    private func updateChallengeProgress(tasksToday: Int, isAllClear: Bool, completedCategoryRaw: String? = nil) {
         var anyCompleted = false
         
         for i in dailyChallenges.indices {
@@ -576,6 +627,11 @@ final class RewardService {
                 completed = hour < 12
             case .brainDump:
                 break  // Set externally via completeBrainDumpChallenge()
+            case .completeCategory(let rawValue, _):
+                // Phase 10: Category-specific challenge
+                if let catRaw = completedCategoryRaw, catRaw == rawValue {
+                    completed = true
+                }
             }
             
             if completed {
@@ -600,9 +656,9 @@ final class RewardService {
         
         // Award bonus fish
         let wardrobe = fetchOrCreateWardrobe(context: context)
-        wardrobe.snowflakes += dailyChallenges[idx].bonusFish
-        wardrobe.lifetimeSnowflakes += dailyChallenges[idx].bonusFish
-        try? context.save()
+        wardrobe.fish += dailyChallenges[idx].bonusFish
+        wardrobe.lifetimeFish += dailyChallenges[idx].bonusFish
+        safeSave(context, label: "brainDumpChallenge")
         syncState(from: wardrobe)
         
         NotificationCenter.default.post(

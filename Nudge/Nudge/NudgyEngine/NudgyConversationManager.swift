@@ -12,6 +12,7 @@ import SwiftData
 
 #if canImport(FoundationModels)
 import FoundationModels
+import os
 #endif
 
 // MARK: - Conversation Response
@@ -85,22 +86,27 @@ final class NudgyConversationManager {
             "- \(task.emoji ?? "doc.text.fill") \(task.content)"
         }.joined(separator: "\n")
         
+        // Phase 14: Build category breakdown for brain dump context
+        let categoryContext = Self.buildCategoryContext(from: activeTasks)
+        
         let systemPrompt = NudgyPersonality.brainDumpConversationPrompt(
             memoryContext: memoryContext,
             taskContext: taskContext,
-            timeContext: timeContext
+            timeContext: timeContext,
+            categoryContext: categoryContext
         )
         
         conversationStore.startConversation(systemPrompt: systemPrompt)
         
-        print("🧠🎙️ Brain dump conversation started. Active tasks: \(activeTasks.count), Memory facts: \(NudgyMemory.shared.store.facts.count)")
-        print("🧠🎙️ System prompt length: \(systemPrompt.count) chars")
+        Log.ai.debug("Brain dump conversation started. Active tasks: \(activeTasks.count), Memory facts: \(NudgyMemory.shared.store.facts.count)")
+        Log.ai.debug("System prompt length: \(systemPrompt.count) chars")
     }
     
     // MARK: - Conversation Lifecycle
     
     /// Ensure a conversation is active with the full system prompt.
-    func ensureConversationActive(taskContext: String = "") {
+    /// Phase 14: Added optional modelContext to build category context.
+    func ensureConversationActive(taskContext: String = "", modelContext: ModelContext? = nil) {
         guard !conversationStore.isActive else { return }
         
         let memory = NudgyMemory.shared
@@ -115,10 +121,19 @@ final class NudgyConversationManager {
         }
         let timeContext = "It's \(timeOfDay), \(Date.now.formatted(.dateTime.weekday(.wide).month().day()))"
         
+        // Phase 14: Build category context from active tasks if modelContext available
+        var categoryContext = ""
+        if let modelContext {
+            let repo = NudgeRepository(modelContext: modelContext)
+            let activeTasks = repo.fetchActiveQueue()
+            categoryContext = Self.buildCategoryContext(from: activeTasks)
+        }
+        
         let systemPrompt = NudgyPersonality.systemPrompt(
             memoryContext: memoryContext,
             taskContext: taskContext,
-            timeContext: timeContext
+            timeContext: timeContext,
+            categoryContext: categoryContext
         )
         
         conversationStore.startConversation(systemPrompt: systemPrompt)
@@ -131,7 +146,7 @@ final class NudgyConversationManager {
         _ userMessage: String,
         modelContext: ModelContext
     ) async -> ConversationResponse {
-        ensureConversationActive()
+        ensureConversationActive(modelContext: modelContext)
         conversationStore.addUserMessage(userMessage)
         if isBrainDumpMode { fullTranscript.append(userMessage) }
         isGenerating = true
@@ -212,9 +227,7 @@ final class NudgyConversationManager {
             )
             
         } catch is NudgyLLMError where NudgyLLMService.shared.isCircuitOpen {
-            #if DEBUG
-            print("⚠️ Circuit breaker open — skipping OpenAI, going to fallbacks")
-            #endif
+            Log.ai.warning("Circuit breaker open — skipping OpenAI, going to fallbacks")
             
             // Try Apple Foundation Models before dumb fallback
             let appleFMResponse = await appleFMFallback(userMessage, modelContext: modelContext)
@@ -229,9 +242,7 @@ final class NudgyConversationManager {
             return fallbackResponse
             
         } catch {
-            #if DEBUG
-            print("⚠️ NudgyConversation error: \(error)")
-            #endif
+            Log.ai.error("NudgyConversation error: \(error, privacy: .public)")
             
             // Try Apple Foundation Models before dumb fallback
             let appleFMResponse = await appleFMFallback(userMessage, modelContext: modelContext)
@@ -259,7 +270,7 @@ final class NudgyConversationManager {
         // Cancel any in-flight generation
         generationTask?.cancel()
         
-        ensureConversationActive()
+        ensureConversationActive(modelContext: modelContext)
         conversationStore.addUserMessage(userMessage)
         if isBrainDumpMode { fullTranscript.append(userMessage) }
         isGenerating = true
@@ -283,7 +294,7 @@ final class NudgyConversationManager {
                 : NudgyToolDefinitions.allTools
             let brainDumpToolChoice = "required"
             
-            print("🧠💬 sendStreaming: brainDump=\(isBrainDumpMode), msg='\(userMessage.prefix(60))'")
+            Log.ai.debug("sendStreaming: brainDump=\(self.isBrainDumpMode), msg='\(userMessage.prefix(60))'")
             
             // Tool call loop — iterate up to 3 times to handle multi-step tool use
             var iterations = 0
@@ -297,7 +308,7 @@ final class NudgyConversationManager {
                     toolChoice: iterations == 1 && isBrainDumpMode ? brainDumpToolChoice : "auto"
                 )
                 
-                print("🧠💬 iteration \(iterations): hasToolCalls=\(response.hasToolCalls), toolCount=\(response.toolCalls.count), content='\(response.content.prefix(60))'")
+                Log.ai.debug("iteration \(iterations): hasToolCalls=\(response.hasToolCalls), toolCount=\(response.toolCalls.count), content='\(response.content.prefix(60))'")
                 
                 if response.hasToolCalls {
                     // Execute tool calls (may be multiple — brain dump can produce several tasks per turn)
@@ -310,7 +321,7 @@ final class NudgyConversationManager {
                     totalToolCalls += results.count
                     
                     for result in results {
-                        print("🧠🔧 Tool result [\(result.toolCallId)]: \(result.result.prefix(80))")
+                        Log.ai.debug("Tool result [\(result.toolCallId)]: \(result.result.prefix(80))")
                         conversationStore.addToolMessage(result.result, toolCallId: result.toolCallId)
                         allSideEffects.append(contentsOf: result.sideEffects)
                         
@@ -353,7 +364,7 @@ final class NudgyConversationManager {
                 }
                 
                 let finalText = conversationStore.messages.last?.content ?? ""
-                print("🧠💬 Final response (\(totalToolCalls) tools): '\(finalText.prefix(80))'")
+                Log.ai.debug("Final response (\(totalToolCalls) tools): '\(finalText.prefix(80))'")
                 
                 return ConversationResponse(
                     text: finalText,
@@ -383,9 +394,7 @@ final class NudgyConversationManager {
             )
             
         } catch {
-            #if DEBUG
-            print("⚠️ NudgyConversation streaming error: \(error)")
-            #endif
+            Log.ai.error("NudgyConversation streaming error: \(error, privacy: .public)")
             
             // Try Apple Foundation Models before dumb fallback
             let appleFMResponse = await appleFMFallback(userMessage, modelContext: modelContext)
@@ -422,9 +431,7 @@ final class NudgyConversationManager {
                 temperature: NudgyConfig.OpenAI.conversationTemperature
             )
         } catch {
-            #if DEBUG
-            print("⚠️ NudgyConversation one-shot OpenAI error: \(error)")
-            #endif
+            Log.ai.warning("NudgyConversation one-shot OpenAI error: \(error, privacy: .public)")
         }
         
         // Fallback: Apple Foundation Models
@@ -436,14 +443,10 @@ final class NudgyConversationManager {
                     instructions: NudgyPersonality.compactPrompt()
                 )
                 let response = try await session.respond(to: prompt)
-                #if DEBUG
-                print("🍎 NudgyConversation one-shot Apple FM success")
-                #endif
+                Log.ai.debug("NudgyConversation one-shot Apple FM success")
                 return response.content
             } catch {
-                #if DEBUG
-                print("⚠️ NudgyConversation one-shot Apple FM error: \(error)")
-                #endif
+                Log.ai.warning("NudgyConversation one-shot Apple FM error: \(error, privacy: .public)")
             }
         }
         #endif
@@ -485,9 +488,7 @@ final class NudgyConversationManager {
                     mood: wasBrainDump ? "brain-dump" : nil
                 )
                 NudgyMemory.shared.saveConversationSummary(summary)
-                #if DEBUG
-                print("🧠 Conversation summary saved: \(summary.summary.prefix(80))")
-                #endif
+                Log.ai.debug("Conversation summary saved: \(summary.summary.prefix(80))")
             }
         } else {
             // Short conversation — save basic summary
@@ -500,11 +501,9 @@ final class NudgyConversationManager {
         isBrainDumpMode = false
         fullTranscript = []
         
-        #if DEBUG
         if wasBrainDump {
-            print("🧠🎙️ Brain dump conversation ended. Transcript segments: \(transcript.count)")
+            Log.ai.debug("Brain dump conversation ended. Transcript segments: \(transcript.count)")
         }
-        #endif
     }
     
     /// End the brain dump conversation and return a summary of tasks created.
@@ -544,9 +543,7 @@ final class NudgyConversationManager {
         if #available(iOS 26.0, *) {
             do {
                 guard SystemLanguageModel.default.isAvailable else {
-                    #if DEBUG
-                    print("🍎 Apple FM not available on this device")
-                    #endif
+                    Log.ai.debug("Apple FM not available on this device")
                     return nil
                 }
                 
@@ -575,9 +572,7 @@ final class NudgyConversationManager {
                 
                 let response = try await session.respond(to: input)
                 
-                #if DEBUG
-                print("🍎 Apple FM fallback success: '\(response.content.prefix(80))'")
-                #endif
+                Log.ai.info("Apple FM fallback success: '\(response.content.prefix(80))'")
                 
                 // Process any pending tool actions
                 var sideEffects: [ToolExecutionResult.ToolSideEffect] = []
@@ -605,9 +600,7 @@ final class NudgyConversationManager {
                     toolCallsMade: 0
                 )
             } catch {
-                #if DEBUG
-                print("⚠️ Apple FM fallback error: \(error)")
-                #endif
+                Log.ai.error("Apple FM fallback error: \(error, privacy: .public)")
                 return nil
             }
         }
@@ -696,5 +689,54 @@ final class NudgyConversationManager {
             text: "Tell me what's on your mind! I can add tasks, check your list, or just chat 🐧",
             sideEffects: [], toolCallsMade: 0
         )
+    }
+    
+    // MARK: - Category Context Builder (Phase 14)
+    
+    /// Build a natural-language category breakdown from active tasks for LLM injection.
+    static func buildCategoryContext(from activeTasks: [NudgeItem]) -> String {
+        guard !activeTasks.isEmpty else { return "" }
+        
+        // Group by category
+        var catCounts: [TaskCategory: Int] = [:]
+        var overdueByCat: [TaskCategory: Int] = [:]
+        var staleByCat: [TaskCategory: Int] = [:]
+        
+        for item in activeTasks {
+            let cat = item.resolvedCategory
+            catCounts[cat, default: 0] += 1
+            if let due = item.dueDate, due < .now {
+                overdueByCat[cat, default: 0] += 1
+            }
+            if item.isCategoryStale {
+                staleByCat[cat, default: 0] += 1
+            }
+        }
+        
+        let sorted = catCounts.sorted { $0.value > $1.value }
+        guard !sorted.isEmpty else { return "" }
+        
+        var lines: [String] = []
+        lines.append("Active tasks by category:")
+        for (cat, count) in sorted.prefix(8) {
+            var line = "- \(cat.emoji) \(cat.label): \(count) task\(count == 1 ? "" : "s")"
+            if let overdue = overdueByCat[cat], overdue > 0 {
+                line += " (\(overdue) overdue)"
+            }
+            if let stale = staleByCat[cat], stale > 0 {
+                line += " (\(stale) stale)"
+            }
+            lines.append(line)
+        }
+        
+        // Add memory patterns
+        let memory = NudgyMemory.shared
+        if !memory.store.lastWeekTopCategories.isEmpty {
+            let weekLabels = memory.store.lastWeekTopCategories
+                .compactMap { TaskCategory(rawValue: $0)?.label }
+            lines.append("This week they've been most active in: \(weekLabels.joined(separator: ", "))")
+        }
+        
+        return lines.joined(separator: "\n")
     }
 }

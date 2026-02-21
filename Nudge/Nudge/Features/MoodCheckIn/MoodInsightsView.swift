@@ -115,8 +115,9 @@ struct MoodInsightsView: View {
                     let entry = entryForDate(date)
                     VStack(spacing: 4) {
                         if let entry {
-                            Text(entry.mood.emoji)
-                                .font(.system(size: 16))
+                            Image(systemName: entry.mood.icon)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(entry.mood.color)
                             
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(entry.mood.color)
@@ -207,8 +208,9 @@ struct MoodInsightsView: View {
                 let maxTasks = 10.0
                 
                 HStack(spacing: DesignTokens.spacingSM) {
-                    Text(mood.emoji)
-                        .font(.system(size: 18))
+                    Image(systemName: mood.icon)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(mood.color)
                         .frame(width: 28)
                     
                     GeometryReader { geo in
@@ -248,8 +250,9 @@ struct MoodInsightsView: View {
             
             ForEach(Array(filteredEntries.prefix(10))) { entry in
                 HStack(spacing: DesignTokens.spacingMD) {
-                    Text(entry.mood.emoji)
-                        .font(.system(size: 22))
+                    Image(systemName: entry.mood.icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(entry.mood.color)
                     
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.mood.label)
@@ -316,9 +319,7 @@ struct MoodInsightsView: View {
     }
     
     private func dayLabel(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "E"
-        return String(formatter.string(from: date).prefix(2))
+        return String(date.formatted(.dateTime.weekday(.abbreviated)).prefix(2))
     }
     
     private func moodForValue(_ value: Double) -> MoodLevel? {

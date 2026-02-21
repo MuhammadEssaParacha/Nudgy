@@ -210,7 +210,7 @@ struct TimelineView: View {
         // Column-aware horizontal layout
         let labelWidth: CGFloat = 60
         let trailingPad: CGFloat = DesignTokens.spacingLG
-        let availableWidth = UIScreen.main.bounds.width - labelWidth - trailingPad - (DesignTokens.spacingLG * 2)
+        let availableWidth = UIScreen.current.bounds.width - labelWidth - trailingPad - (DesignTokens.spacingLG * 2)
         let columnWidth = availableWidth / CGFloat(totalColumns)
         let columnGap: CGFloat = totalColumns > 1 ? 2 : 0
         let xOffset = labelWidth + CGFloat(column) * columnWidth
@@ -318,7 +318,8 @@ struct TimelineView: View {
     }
     
     private func scrollToNow(proxy: ScrollViewProxy) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.3))
             proxy.scrollTo("timeline", anchor: .center)
         }
     }

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Nudgy Scarf Preview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0a;
+    color: #ccc;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 12px;
+    display: flex;
+    gap: 24px;
+    padding: 24px;
+    align-items: flex-start;
+  }
+  #canvas-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #label { color: #555; font-size: 10px; }
+  #controls {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 300px;
+  }
+  .section-title { color: #fff; font-size: 13px; font-weight: bold; border-bottom: 1px solid #333; padding-bottom: 6px; }
+  .ctrl { display: flex; flex-direction: column; gap: 3px; }
+  .ctrl-row { display: flex; justify-content: space-between; align-items: center; }
+  .ctrl-label { color: #aaa; }
+  .ctrl-val { color: #E53935; font-weight: bold; min-width: 44px; text-align: right; }
+  .ctrl-note { color: #555; font-size: 10px; }
+  input[type=range] { width: 100%; accent-color: #E53935; cursor: pointer; }
+  #swift-box {
+    background: #0d1117;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 10px;
+    color: #7ee787;
+    white-space: pre;
+    line-height: 1.6;
+    border: 1px solid #1e3a1e;
+  }
+  #hint {
+    color: #555;
+    font-size: 10px;
+    text-align: center;
+    max-width: 200px;
+  }
+  button {
+    background: #E53935;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  button:hover { background: #c62828; }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <div id="label">Nudgy · p=200 · 2× display scale</div>
+  <!-- Canvas: viewBox 200×230 (p × p*1.15), rendered at 400×460 = 2× -->
+  <svg id="preview" width="400" height="460" viewBox="0 0 200 230" style="border-radius:16px">
+
+    <!-- ── BACKGROUND ── -->
+    <rect width="200" height="230" fill="#1C1C1E" rx="12"/>
+
+    <!-- ── GROUND SHADOW ── -->
+    <ellipse cx="100" cy="222" rx="40" ry="6"
+      fill="none"
+      style="fill: radial-gradient(ellipse, rgba(0,0,0,0.22), transparent)"/>
+    <ellipse cx="100" cy="222" rx="40" ry="5.5" fill="rgba(0,0,0,0.18)"/>
+
+    <!-- ── FEET ── -->
+    <ellipse cx="91"  cy="218" rx="9" ry="3.5" fill="#FF8C42" transform="rotate(-12,91,218)"/>
+    <ellipse cx="109" cy="218" rx="9" ry="3.5" fill="#FF8C42" transform="rotate(12,109,218)"/>
+
+    <!-- ── BODY  (p*0.79 × p*0.94, center 100,129) ── -->
+    <defs>
+      <radialGradient id="bodyGrad" cx="35%" cy="30%" r="65%">
+        <stop offset="0%"   stop-color="#2d2d52"/>
+        <stop offset="100%" stop-color="#111125"/>
+      </radialGradient>
+    </defs>
+    <ellipse cx="100" cy="129" rx="39.5" ry="47" fill="url(#bodyGrad)"/>
+    <!-- Body rim light -->
+    <ellipse cx="100" cy="129" rx="39.5" ry="47"
+      fill="none" stroke="rgba(100,136,187,0.15)" stroke-width="1.5"/>
+
+    <!-- ── BELLY  (p*0.58 × p*0.76, center 100,141) ── -->
+    <defs>
+      <radialGradient id="bellyGrad" cx="40%" cy="35%" r="60%">
+        <stop offset="0%"   stop-color="#f5f0e0"/>
+        <stop offset="100%" stop-color="#d8d2c0"/>
+      </radialGradient>
+    </defs>
+    <ellipse cx="100" cy="141" rx="29" ry="38" fill="url(#bellyGrad)"/>
+
+    <!-- ── WINGS  (rough, just for reference) ── -->
+    <ellipse cx="64"  cy="129" rx="7" ry="15" fill="#1a1a30" transform="rotate(-12,64,129)"/>
+    <ellipse cx="136" cy="129" rx="7" ry="15" fill="#1a1a30" transform="rotate(12,136,129)"/>
+
+    <!-- ── AO SHADOW under chin ── -->
+    <ellipse cx="100" cy="116" rx="16" ry="4" fill="rgba(0,0,0,0.14)"/>
+
+    <!-- ════════════════════════════════════════════
+         SCARF  —  inserted HERE (before head)
+         so head naturally occludes centre
+         ═══════════════════════════════════════════ -->
+    <g id="scarf-group"></g>
+
+    <!-- ── HEAD  (p*0.605 × p*0.56, center 100,77) ── -->
+    <defs>
+      <radialGradient id="headGrad" cx="35%" cy="30%" r="65%">
+        <stop offset="0%"   stop-color="#2d2d52"/>
+        <stop offset="100%" stop-color="#111125"/>
+      </radialGradient>
+    </defs>
+    <ellipse cx="100" cy="77" rx="30.25" ry="28" fill="url(#headGrad)"/>
+    <ellipse cx="100" cy="77" rx="30.25" ry="28"
+      fill="none" stroke="rgba(100,136,187,0.12)" stroke-width="1"/>
+
+    <!-- ── FACE PATCH  (p*0.40 × p*0.34, center 100,85) ── -->
+    <ellipse cx="100" cy="85" rx="20" ry="17" fill="#f0ece0"/>
+
+    <!-- ── EYES ── -->
+    <!-- Left eye -->
+    <circle cx="88"   cy="74"   r="4.4"  fill="white"/>
+    <circle cx="88"   cy="74"   r="3.5"  fill="#0d0d0d"/>
+    <circle cx="89.4" cy="72.5" r="1.2"  fill="white" opacity="0.9"/>
+    <circle cx="87.2" cy="75.6" r="0.7"  fill="white" opacity="0.5"/>
+    <!-- Right eye (slightly larger) -->
+    <circle cx="112"   cy="74"   r="4.75" fill="white"/>
+    <circle cx="112"   cy="74"   r="3.85" fill="#0d0d0d"/>
+    <circle cx="113.4" cy="72.5" r="1.2"  fill="white" opacity="0.9"/>
+    <circle cx="111.2" cy="75.6" r="0.7"  fill="white" opacity="0.5"/>
+
+    <!-- ── BEAK ── -->
+    <ellipse cx="100" cy="87.5" rx="5.2" ry="3.5" fill="#FF8C00"/>
+    <ellipse cx="100" cy="86.5" rx="4.5" ry="1.5" fill="#FFA726" opacity="0.5"/>
+
+    <!-- ── CHEEK BLUSH ── -->
+    <ellipse cx="82"  cy="83" rx="5.5" ry="3" fill="#FF8A80" opacity="0.3"/>
+    <ellipse cx="118" cy="83" rx="5.5" ry="3" fill="#FF8A80" opacity="0.3"/>
+
+  </svg>
+  <div id="hint">Adjust sliders → see result instantly<br>Copy Swift values below → paste into code</div>
+  <button onclick="copySwift()">📋 Copy Swift Values</button>
+</div>
+
+<!-- ── CONTROLS ── -->
+<div id="controls">
+  <div class="section-title">🧣 Scarf Parameters</div>
+
+  <div class="ctrl">
+    <div class="ctrl-row">
+      <span class="ctrl-label">offset Y  <small style="color:#555">(p ×)</small></span>
+      <span class="ctrl-val" id="v-offsetY">0.170</span>
+    </div>
+    <input type="range" id="offsetY" min="0.08" max="0.28" step="0.005" value="0.170">
+    <div class="ctrl-note">↑ smaller = scarf moves up toward neck · head bottom at +0.09p</div>
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row">
+      <span class="ctrl-label">scarfW  <small style="color:#555">(p ×)</small></span>
+      <span class="ctrl-val" id="v-scarfW">0.50</span>
+    </div>
+    <input type="range" id="scarfW" min="0.30" max="0.80" step="0.01" value="0.50">
+    <div class="ctrl-note">head width = 0.605p for reference</div>
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row">
+      <span class="ctrl-label">bandH  <small style="color:#555">(p ×)</small></span>
+      <span class="ctrl-val" id="v-bandH">0.095</span>
+    </div>
+    <input type="range" id="bandH" min="0.03" max="0.18" step="0.005" value="0.095">
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row">
+      <span class="ctrl-label">top edge dip</span>
+      <span class="ctrl-val" id="v-topDip">0.38</span>
+    </div>
+    <input type="range" id="topDip" min="0.0" max="0.80" step="0.02" value="0.38">
+    <div class="ctrl-note">depth of ∪ chin-following curve (0 = flat line)</div>
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row">
+      <span class="ctrl-label">knot radius  <small style="color:#555">(p ×)</small></span>
+      <span class="ctrl-val" id="v-kr">0.056</span>
+    </div>
+    <input type="range" id="kr" min="0.02" max="0.14" step="0.004" value="0.056">
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row">
+      <span class="ctrl-label">knot X  <small style="color:#555">(scarfW ×)</small></span>
+      <span class="ctrl-val" id="v-kxFrac">0.58</span>
+    </div>
+    <input type="range" id="kxFrac" min="0.35" max="0.70" step="0.02" value="0.58">
+    <div class="ctrl-note">0.5 = centre, 0.6 = right-of-centre</div>
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-row">
+      <span class="ctrl-label">tail height  <small style="color:#555">(p ×)</small></span>
+      <span class="ctrl-val" id="v-tailH">0.128</span>
+    </div>
+    <input type="range" id="tailH" min="0.04" max="0.22" step="0.005" value="0.128">
+  </div>
+
+  <div class="section-title" style="margin-top:4px">📋 Swift Output</div>
+  <pre id="swift-box"></pre>
+</div>
+
+<script>
+// ── coordinate helpers ──────────────────────────────────────────────────────
+const p  = 200;        // must match Swift `p`
+const zcx = 100;       // ZStack centre x
+const zcy = 115;       // ZStack centre y  (height/2 = 230/2)
+
+function topY(nx, padT, bandH, dip) {
+  return padT + bandH * dip * 4 * nx * (1 - nx);
+}
+function botY(nx, padT, bandH, dip) {
+  return topY(nx, padT, bandH, dip) + bandH;   // uniform thickness
+}
+
+// Scarf frame top-left in SVG (absolute) coords
+function scarfOrigin(scarfW, totalH, offsetY) {
+  return {
+    x: zcx - scarfW / 2,
+    y: zcy + offsetY - totalH / 2
+  };
+}
+
+// Absolute SVG coord string
+function a(ox, oy, lx, ly) { return `${ox+lx},${oy+ly}`; }
+
+// ── main draw ───────────────────────────────────────────────────────────────
+function redraw() {
+  const offsetY = +document.getElementById('offsetY').value * p;
+  const scarfW  = +document.getElementById('scarfW').value  * p;
+  const bandH   = +document.getElementById('bandH').value   * p;
+  const dip     = +document.getElementById('topDip').value;
+  const kr      = +document.getElementById('kr').value      * p;
+  const kxFrac  = +document.getElementById('kxFrac').value;
+  const tailH   = +document.getElementById('tailH').value   * p;
+
+  // update display values
+  document.getElementById('v-offsetY').textContent = (+document.getElementById('offsetY').value).toFixed(3);
+  document.getElementById('v-scarfW' ).textContent = (+document.getElementById('scarfW' ).value).toFixed(2);
+  document.getElementById('v-bandH'  ).textContent = (+document.getElementById('bandH'  ).value).toFixed(3);
+  document.getElementById('v-topDip' ).textContent = (+document.getElementById('topDip' ).value).toFixed(2);
+  document.getElementById('v-kr'     ).textContent = (+document.getElementById('kr'     ).value).toFixed(3);
+  document.getElementById('v-kxFrac' ).textContent = (+document.getElementById('kxFrac' ).value).toFixed(2);
+  document.getElementById('v-tailH'  ).textContent = (+document.getElementById('tailH'  ).value).toFixed(3);
+
+  const padT      = p * 0.018;
+  const tailW     = p * 0.054;
+  const totalH    = padT + bandH + tailH + p * 0.022;
+
+  const kx        = scarfW * kxFrac;
+  const ky        = padT + bandH * 0.50;
+  const tailPivY  = padT + bandH * 0.88;
+
+  const { x: ox, y: oy } = scarfOrigin(scarfW, totalH, offsetY);
+
+  // ── Band path ──
+  const pts = [0, 0.22, 0.40, 0.50, 0.60, 0.78, 1.0];
+  const tY = pts.map(nx => topY(nx, padT, bandH, dip));
+  const bY = pts.map(nx => botY(nx, padT, bandH, dip));
+  const xp = pts.map(nx => nx * scarfW);
+
+  const bandPath = [
+    `M ${a(ox,oy, xp[0], tY[0])}`,
+    `C ${a(ox,oy, xp[1], tY[1])} ${a(ox,oy, xp[2], tY[2])} ${a(ox,oy, xp[3], tY[3])}`,
+    `C ${a(ox,oy, xp[4], tY[4])} ${a(ox,oy, xp[5], tY[5])} ${a(ox,oy, xp[6], tY[6])}`,
+    `L ${a(ox,oy, xp[6], bY[6])}`,
+    `C ${a(ox,oy, xp[5], bY[5])} ${a(ox,oy, xp[4], bY[4])} ${a(ox,oy, xp[3], bY[3])}`,
+    `C ${a(ox,oy, xp[2], bY[2])} ${a(ox,oy, xp[1], bY[1])} ${a(ox,oy, xp[0], bY[0])}`,
+    `Z`
+  ].join(' ');
+
+  // ── Tail path ──
+  const hw = tailW / 2;
+  const tailPath = [
+    `M ${a(ox,oy, kx-hw,          tailPivY)}`,
+    `L ${a(ox,oy, kx+hw,          tailPivY)}`,
+    `C ${a(ox,oy, kx+hw*1.10, tailPivY+tailH*0.26)} ${a(ox,oy, kx+hw*0.62, tailPivY+tailH*0.72)} ${a(ox,oy, kx+hw*0.28, tailPivY+tailH)}`,
+    `C ${a(ox,oy, kx+hw*0.08, tailPivY+tailH*0.98)} ${a(ox,oy, kx-hw*0.08, tailPivY+tailH*0.98)} ${a(ox,oy, kx-hw*0.30, tailPivY+tailH)}`,
+    `C ${a(ox,oy, kx-hw*0.72, tailPivY+tailH*0.66)} ${a(ox,oy, kx-hw*1.10, tailPivY+tailH*0.24)} ${a(ox,oy, kx-hw, tailPivY)}`,
+    `Z`
+  ].join(' ');
+
+  // ── Knot path (teardrop) ──
+  const knotPath = [
+    `M ${a(ox,oy, kx-kr, ky)}`,
+    `C ${a(ox,oy, kx-kr*0.22, ky-kr*1.58)} ${a(ox,oy, kx+kr*0.22, ky-kr*1.58)} ${a(ox,oy, kx+kr, ky)}`,
+    `C ${a(ox,oy, kx+kr*0.52, ky+kr*1.08)} ${a(ox,oy, kx-kr*0.52, ky+kr*1.08)} ${a(ox,oy, kx-kr, ky)}`,
+    `Z`
+  ].join(' ');
+
+  // gradient IDs need unique positions
+  const gid = `kg_${Date.now()}`;
+
+  const svg = `
+    <defs>
+      <linearGradient id="bandG" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#EF9A9A"/>
+        <stop offset="20%"  stop-color="#EF5350"/>
+        <stop offset="45%"  stop-color="#E53935"/>
+        <stop offset="75%"  stop-color="#C62828"/>
+        <stop offset="100%" stop-color="#7F0000"/>
+      </linearGradient>
+      <linearGradient id="tailG" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#E53935"/>
+        <stop offset="60%"  stop-color="#B71C1C"/>
+        <stop offset="100%" stop-color="#7F0000"/>
+      </linearGradient>
+      <radialGradient id="${gid}" cx="${ox+kx}" cy="${oy+ky-kr*0.4}" r="${kr*2.2}" gradientUnits="userSpaceOnUse">
+        <stop offset="0%"   stop-color="#FF5252"/>
+        <stop offset="35%"  stop-color="#E53935"/>
+        <stop offset="70%"  stop-color="#C62828"/>
+        <stop offset="100%" stop-color="#7F0000"/>
+      </radialGradient>
+    </defs>
+
+    <!-- Tail (behind band) -->
+    <path d="${tailPath}" fill="url(#tailG)"/>
+
+    <!-- Band -->
+    <path d="${bandPath}" fill="url(#bandG)"/>
+
+    <!-- Top fold shadow -->
+    <path d="M ${a(ox,oy, xp[0], tY[0])}
+             C ${a(ox,oy, xp[1], tY[1])} ${a(ox,oy, xp[2], tY[2])} ${a(ox,oy, xp[3], tY[3])}
+             C ${a(ox,oy, xp[4], tY[4])} ${a(ox,oy, xp[5], tY[5])} ${a(ox,oy, xp[6], tY[6])}
+             L ${a(ox,oy, xp[6], tY[6]+bandH*0.22)}
+             C ${a(ox,oy, xp[5], tY[5]+bandH*0.12)} ${a(ox,oy, xp[4], tY[4]+bandH*0.18)} ${a(ox,oy, xp[3], tY[3]+bandH*0.20)}
+             C ${a(ox,oy, xp[2], tY[2]+bandH*0.16)} ${a(ox,oy, xp[1], tY[1]+bandH*0.10)} ${a(ox,oy, xp[0], tY[0]+bandH*0.18)}
+             Z"
+          fill="rgba(0,0,0,0.15)"/>
+
+    <!-- Specular highlight -->
+    <path d="M ${a(ox,oy, xp[0]*0.3+p*0.03, tY[0]+bandH*0.28)}
+             C ${a(ox,oy, p*0.09, tY[1]+bandH*0.07)} ${a(ox,oy, p*0.22, tY[2]+bandH*0.05)} ${a(ox,oy, kx*0.75, tY[3]+bandH*0.13)}
+             C ${a(ox,oy, kx*0.75, tY[3]+bandH*0.30)} ${a(ox,oy, p*0.09, tY[1]+bandH*0.38)} ${a(ox,oy, xp[0]*0.3+p*0.03, tY[0]+bandH*0.28)}
+             Z"
+          fill="rgba(255,255,255,0.18)"/>
+
+    <!-- Ribbing lines (3) -->
+    ${[1,2,3].map(i => {
+      const f = i / 4;
+      const ly = topY(0,   padT, bandH, dip) + (botY(0,   padT, bandH, dip) - topY(0,   padT, bandH, dip)) * f;
+      const my = topY(0.5, padT, bandH, dip) + (botY(0.5, padT, bandH, dip) - topY(0.5, padT, bandH, dip)) * f;
+      const ry = topY(1,   padT, bandH, dip) + (botY(1,   padT, bandH, dip) - topY(1,   padT, bandH, dip)) * f;
+      return `<path d="M ${a(ox,oy, scarfW*0.02, ly)}
+                C ${a(ox,oy, scarfW*0.30, my-bandH*0.01)} ${a(ox,oy, scarfW*0.70, my+bandH*0.01)} ${a(ox,oy, scarfW*0.98, ry)}"
+              fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="0.45"/>`;
+    }).join('\n    ')}
+
+    <!-- Knot shadow -->
+    <ellipse cx="${ox+kx+p*0.005}" cy="${oy+ky+p*0.006}" rx="${kr*1.18}" ry="${kr*0.95}"
+             fill="rgba(0,0,0,0.28)"/>
+
+    <!-- Knot body -->
+    <path d="${knotPath}" fill="url(#${gid})"/>
+
+    <!-- Knot highlight -->
+    <ellipse cx="${ox+kx-kr*0.18}" cy="${oy+ky-kr*0.72}"
+             rx="${kr*0.44}" ry="${kr*0.24}" fill="rgba(255,255,255,0.38)"/>
+  `;
+
+  document.getElementById('scarf-group').innerHTML = svg;
+
+  // ── Swift output ──
+  const sw = [
+    `// ── paste into penguinScarf ──`,
+    `let scarfW     = p * ${(scarfW/p).toFixed(2)}`,
+    `let bandH      = p * ${(bandH/p).toFixed(3)}`,
+    `let tailH      = p * ${(tailH/p).toFixed(3)}`,
+    `let kr         = p * ${(kr/p).toFixed(3)}`,
+    `let kx         = scarfW * ${kxFrac.toFixed(2)}`,
+    `// topY factor  = ${dip.toFixed(2)}`,
+    `// .offset(y: p * ${(offsetY/p).toFixed(3)})`,
+  ].join('\n');
+  document.getElementById('swift-box').textContent = sw;
+  window._swiftOut = sw;
+}
+
+function copySwift() {
+  navigator.clipboard.writeText(window._swiftOut || '')
+    .then(() => alert('Copied to clipboard!'))
+    .catch(() => alert(document.getElementById('swift-box').textContent));
+}
+
+document.querySelectorAll('input[type=range]').forEach(el => el.addEventListener('input', redraw));
+redraw();
+</script>
+</body>
+</html>

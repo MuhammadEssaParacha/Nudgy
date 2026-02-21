@@ -11,6 +11,7 @@
 import SwiftUI
 import ContactsUI
 import Contacts
+import os
 
 // MARK: - Contact Resolver
 
@@ -35,9 +36,7 @@ final class ContactResolver {
         do {
             return try await store.requestAccess(for: .contacts)
         } catch {
-            #if DEBUG
-            print("⚠️ Contacts access request failed: \(error)")
-            #endif
+            Log.services.warning("Contacts access request failed: \(error, privacy: .public)")
             return false
         }
     }
@@ -105,9 +104,7 @@ final class ContactResolver {
             
             return ResolvedContact(fullName: fullName, phone: phone, email: email)
         } catch {
-            #if DEBUG
-            print("⚠️ Contact search failed: \(error)")
-            #endif
+            Log.services.warning("Contact search failed: \(error, privacy: .public)")
             return nil
         }
     }
@@ -191,7 +188,7 @@ enum ContactHelper {
             return phone
         case .email:
             return email
-        case .openLink, .search, .navigate, .addToCalendar:
+        case .openLink, .search, .navigate, .addToCalendar, .setAlarm:
             return nil
         }
     }

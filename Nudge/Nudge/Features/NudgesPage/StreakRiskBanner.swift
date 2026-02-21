@@ -48,7 +48,7 @@ struct StreakRiskBanner: View {
                 )
         }
         .nudgeAccessibility(
-            label: String(localized: "\(streak) day streak at risk. Complete one task to keep double snowflakes."),
+            label: String(localized: "\(streak) day streak at risk. Complete one task to keep double fish."),
             hint: nil,
             traits: .isStaticText
         )

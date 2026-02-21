@@ -72,6 +72,20 @@ enum RoutineService {
                     routineID: routine.id,
                     categoryColorHex: routine.colorHex
                 )
+                // Propagate routine category to generated task
+                if let catRaw = routine.categoryRaw,
+                   let cat = TaskCategory(rawValue: catRaw) {
+                    item.categoryRaw = catRaw
+                    item.categoryColorHex = cat.primaryColorHex
+                    item.categoryIcon = cat.icon
+                }
+                // Phase 16: Per-step category override → routine category fallback
+                if let stepCatRaw = step.categoryRaw,
+                   let stepCat = TaskCategory(rawValue: stepCatRaw) {
+                    item.categoryRaw = stepCatRaw
+                    item.categoryColorHex = stepCat.primaryColorHex
+                    item.categoryIcon = stepCat.icon
+                }
                 modelContext.insert(item)
                 generatedCount += 1
             }
@@ -81,7 +95,7 @@ enum RoutineService {
         }
         
         if generatedCount > 0 {
-            try? modelContext.save()
+            do { try modelContext.save() } catch { Log.services.error("[RoutineService] Save failed: \(error, privacy: .public)") }
             routineLog.info("Generated \(generatedCount) tasks from routines")
             
             // Notify data changed

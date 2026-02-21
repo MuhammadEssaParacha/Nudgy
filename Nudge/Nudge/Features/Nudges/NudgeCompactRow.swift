@@ -20,6 +20,7 @@ struct NudgeCompactRow: View {
 
     let item: NudgeItem
     var isExpanded: Bool = false
+    var isCarried: Bool = false
     var onTap: () -> Void = {}
     var onDone: (() -> Void)?
 
@@ -47,6 +48,11 @@ struct NudgeCompactRow: View {
 
                     // Single-line meta — max 2 chips (ADHD: reduce scanning load)
                     HStack(spacing: 6) {
+                        // Carry-forward indicator — shows when item was intentionally chosen for today
+                        if isCarried {
+                            metaChip(icon: "arrow.up.circle.fill", text: String(localized: "Carried"), color: DesignTokens.accentActive)
+                        }
+
                         // Time cue (most important for ADHD — combats time blindness)
                         if let dur = item.durationLabel {
                             metaChip(icon: "clock", text: dur, color: DesignTokens.textSecondary)

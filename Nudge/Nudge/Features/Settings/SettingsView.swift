@@ -132,6 +132,7 @@ struct SettingsView: View {
                                 )
                                 .font(AppTheme.body)
                                 .foregroundStyle(DesignTokens.textPrimary)
+                                .submitLabel(.done)
                                 .padding(DesignTokens.spacingMD)
                                 .background(
                                     RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusChip)
@@ -156,7 +157,6 @@ struct SettingsView: View {
                                                 .foregroundStyle(DesignTokens.textSecondary)
                                         }
                                         Spacer()
-                                        // TODO: Replace with PurchaseService.shared.monthlyProduct?.displayPrice when Pro is enabled
                                         Text(PurchaseService.shared.monthlyProduct?.displayPrice ?? String(localized: "Upgrade"))
                                             .font(AppTheme.body.weight(.bold))
                                             .foregroundStyle(DesignTokens.accentActive)
@@ -266,10 +266,8 @@ struct SettingsView: View {
     }
     
     private func formatHour(_ hour: Int) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h a"
         let date = Calendar.current.date(from: DateComponents(hour: hour)) ?? Date()
-        return formatter.string(from: date)
+        return date.formatted(.dateTime.hour().minute())
     }
 }
 

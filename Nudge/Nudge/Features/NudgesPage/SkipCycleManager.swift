@@ -37,7 +37,7 @@ final class SkipCycleManager {
         // Store previous bounty for contrast
         let species = FishEconomy.speciesForTask(item)
         previousSpecies = species
-        previousBountyValue = FishEconomy.snowflakesForCatch(
+        previousBountyValue = FishEconomy.fishForCatch(
             species: species,
             streak: streak,
             isAllClear: false

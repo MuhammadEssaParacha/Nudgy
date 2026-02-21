@@ -191,7 +191,11 @@ struct AquariumView: View {
                         
                         Spacer()
                         
-                        Text("+\(fish.species.snowflakeValue)❄️")
+                        HStack(spacing: 2) {
+                            Text("+\(fish.species.fishValue)")
+                            Image(systemName: "fish.fill")
+                                .font(.system(size: 8))
+                        }
                             .font(AppTheme.captionBold)
                             .foregroundStyle(DesignTokens.textSecondary)
                     }

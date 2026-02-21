@@ -17,6 +17,7 @@ struct NudgyChatOverlay: View {
 
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var chatMessages: [ChatMessage] { penguinState.chatMessages }
     private var isChatGenerating: Bool { penguinState.isChatGenerating }
@@ -46,13 +47,19 @@ struct NudgyChatOverlay: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(DesignTokens.textTertiary)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
                         .background(
                             Circle()
                                 .fill(Color.white.opacity(0.06))
+                                .frame(width: 32, height: 32)
                         )
                 }
                 .buttonStyle(.plain)
+                .nudgeAccessibility(
+                    label: String(localized: "Close chat"),
+                    traits: .isButton
+                )
             }
             .padding(.horizontal, DesignTokens.spacingLG)
             .padding(.top, DesignTokens.spacingMD)
@@ -66,7 +73,7 @@ struct NudgyChatOverlay: View {
                             VStack(spacing: DesignTokens.spacingMD) {
                                 Image(systemName: "bubble.left.and.text.bubble.right")
                                     .font(.system(size: 36))
-                                    .foregroundStyle(DesignTokens.textTertiary.opacity(0.5))
+                                    .foregroundStyle(DesignTokens.textTertiary)
                                     .symbolRenderingMode(.hierarchical)
                                 Text(String(localized: "Say hi to Nudgy!"))
                                     .font(.system(size: 14))
@@ -87,8 +94,9 @@ struct NudgyChatOverlay: View {
                                     Circle()
                                         .fill(DesignTokens.accentActive.opacity(0.5))
                                         .frame(width: 6, height: 6)
-                                        .offset(y: isChatGenerating ? -3 : 3)
+                                        .offset(y: reduceMotion ? 0 : (isChatGenerating ? -3 : 3))
                                         .animation(
+                                            reduceMotion ? .none :
                                             .easeInOut(duration: 0.45)
                                                 .repeatForever(autoreverses: true)
                                                 .delay(Double(i) * 0.12),
@@ -134,6 +142,7 @@ struct NudgyChatOverlay: View {
                 .foregroundStyle(.white)
                 .lineLimit(1...4)
                 .focused($isInputFocused)
+                .submitLabel(.send)
                 .onSubmit {
                     sendIfReady()
                 }
@@ -149,6 +158,10 @@ struct NudgyChatOverlay: View {
                     }
                     .disabled(isChatGenerating)
                     .transition(.scale.combined(with: .opacity))
+                    .nudgeAccessibility(
+                        label: String(localized: "Send message"),
+                        traits: .isButton
+                    )
                 }
             }
             .padding(.horizontal, DesignTokens.spacingMD)
@@ -172,7 +185,8 @@ struct NudgyChatOverlay: View {
             .padding(.bottom, DesignTokens.spacingMD)
         }
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.3))
                 isInputFocused = true
             }
         }

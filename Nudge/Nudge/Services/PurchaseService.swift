@@ -8,6 +8,7 @@
 
 import StoreKit
 import SwiftUI
+import os
 
 /// Manages Pro subscription state via StoreKit 2.
 @MainActor @Observable
@@ -78,9 +79,7 @@ final class PurchaseService {
                 .sorted { $0.price < $1.price }
         } catch {
             errorMessage = error.localizedDescription
-            #if DEBUG
-            print("❌ Failed to load products: \(error)")
-            #endif
+            Log.purchase.error("Failed to load products: \(error, privacy: .public)")
         }
         
         isLoading = false

@@ -53,19 +53,29 @@ struct RoutineStep: Codable, Identifiable, Hashable {
     var emoji: String?
     var estimatedMinutes: Int?
     var sortOrder: Int
+    /// Phase 16: Optional per-step category override (rawValue of TaskCategory)
+    var categoryRaw: String?
+    
+    /// Resolved step category (nil = inherit from routine)
+    var category: TaskCategory? {
+        get { categoryRaw.flatMap { TaskCategory(rawValue: $0) } }
+        set { categoryRaw = newValue?.rawValue }
+    }
     
     init(
         id: UUID = UUID(),
         content: String,
         emoji: String? = nil,
         estimatedMinutes: Int? = nil,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        categoryRaw: String? = nil
     ) {
         self.id = id
         self.content = content
         self.emoji = emoji
         self.estimatedMinutes = estimatedMinutes
         self.sortOrder = sortOrder
+        self.categoryRaw = categoryRaw
     }
 }
 
@@ -87,6 +97,20 @@ final class Routine {
     
     /// Optional color hex for the routine card
     var colorHex: String?
+    
+    /// Optional category association (rawValue of TaskCategory)
+    var categoryRaw: String?
+    
+    /// Resolved category (nil = no category assigned)
+    var category: TaskCategory? {
+        get { categoryRaw.flatMap { TaskCategory(rawValue: $0) } }
+        set {
+            categoryRaw = newValue?.rawValue
+            if let cat = newValue {
+                colorHex = cat.primaryColorHex
+            }
+        }
+    }
     
     // MARK: Schedule
     
@@ -125,7 +149,8 @@ final class Routine {
         startHour: Int = 8,
         startMinute: Int = 0,
         steps: [RoutineStep] = [],
-        colorHex: String? = nil
+        colorHex: String? = nil,
+        categoryRaw: String? = nil
     ) {
         self.id = UUID()
         self.name = name
@@ -137,6 +162,7 @@ final class Routine {
         self.isActive = true
         self.createdAt = Date()
         self.colorHex = colorHex
+        self.categoryRaw = categoryRaw
         
         // Encode steps
         if let data = try? JSONEncoder().encode(steps),
@@ -190,12 +216,10 @@ final class Routine {
     
     /// Formatted start time string
     var startTimeLabel: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
         let calendar = Calendar.current
         let components = DateComponents(hour: startHour, minute: startMinute)
         if let date = calendar.date(from: components) {
-            return formatter.string(from: date)
+            return date.formatted(.dateTime.hour().minute())
         }
         return "\(startHour):\(String(format: "%02d", startMinute))"
     }

@@ -11,6 +11,7 @@
 
 import SwiftUI
 import SwiftData
+import os
 
 struct RoutineEditorView: View {
     
@@ -29,11 +30,13 @@ struct RoutineEditorView: View {
     @State private var startMinute: Int = 0
     @State private var colorHex: String = "007AFF"
     @State private var steps: [RoutineStep] = []
+    @State private var selectedCategory: TaskCategory?
     
     // UI state
     @State private var newStepContent: String = ""
     @State private var showEmojiGrid = false
     @State private var editingStepID: UUID?
+    @State private var showDeleteConfirmation = false
     
     private let isEditing: Bool
     
@@ -68,6 +71,9 @@ struct RoutineEditorView: View {
                     // Schedule
                     scheduleSection
                     
+                    // Category (optional)
+                    routineCategorySection
+                    
                     // Color
                     colorSection
                     
@@ -83,6 +89,7 @@ struct RoutineEditorView: View {
                 .padding(.top, DesignTokens.spacingMD)
                 .padding(.bottom, 100)
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(Color.black.ignoresSafeArea())
             .navigationTitle(isEditing ? String(localized: "Edit Routine") : String(localized: "New Routine"))
             .navigationBarTitleDisplayMode(.inline)
@@ -166,6 +173,7 @@ struct RoutineEditorView: View {
                 .font(AppTheme.headline)
                 .foregroundStyle(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
+                .submitLabel(.done)
                 .padding(DesignTokens.spacingMD)
                 .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusCard))
         }
@@ -282,6 +290,62 @@ struct RoutineEditorView: View {
         }
     }
     
+    // MARK: - Category Section
+    
+    private var routineCategorySection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.spacingMD) {
+            Text(String(localized: "Category"))
+                .font(AppTheme.headline)
+                .foregroundStyle(DesignTokens.textPrimary)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DesignTokens.spacingXS) {
+                    // "None" option
+                    Button {
+                        withAnimation(AnimationConstants.springSmooth) { selectedCategory = nil }
+                        HapticService.shared.actionButtonTap()
+                    } label: {
+                        Text(String(localized: "None"))
+                            .font(.system(size: 12, weight: selectedCategory == nil ? .bold : .medium))
+                            .foregroundStyle(selectedCategory == nil ? .white : DesignTokens.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(selectedCategory == nil ? DesignTokens.accentActive.opacity(0.3) : Color.white.opacity(0.05))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    
+                    ForEach(TaskCategory.allCases.filter { $0 != .general }, id: \.self) { cat in
+                        Button {
+                            withAnimation(AnimationConstants.springSmooth) {
+                                selectedCategory = cat
+                                colorHex = cat.primaryColorHex
+                            }
+                            HapticService.shared.actionButtonTap()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: cat.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(selectedCategory == cat ? .white : cat.primaryColor)
+                                Text(cat.label).font(.system(size: 12, weight: selectedCategory == cat ? .bold : .medium))
+                            }
+                            .foregroundStyle(selectedCategory == cat ? .white : DesignTokens.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(selectedCategory == cat ? cat.primaryColor.opacity(0.3) : Color.white.opacity(0.05))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+    
     // MARK: - Color Section
     
     private var colorSection: some View {
@@ -352,6 +416,7 @@ struct RoutineEditorView: View {
                 TextField(String(localized: "Add a step..."), text: $newStepContent)
                     .font(AppTheme.body)
                     .foregroundStyle(DesignTokens.textPrimary)
+                    .submitLabel(.done)
                     .onSubmit {
                         addStep()
                     }
@@ -365,6 +430,7 @@ struct RoutineEditorView: View {
                             .foregroundStyle(DesignTokens.accentActive)
                     }
                     .buttonStyle(.plain)
+                    .nudgeAccessibility(label: String(localized: "Add step"), hint: nil, traits: .isButton)
                 }
             }
             .padding(DesignTokens.spacingMD)
@@ -401,10 +467,29 @@ struct RoutineEditorView: View {
                     .foregroundStyle(DesignTokens.textPrimary)
                     .lineLimit(1)
                 
-                if let mins = step.estimatedMinutes, mins > 0 {
-                    Text(String(localized: "\(mins) min"))
-                        .font(.system(size: 10))
-                        .foregroundStyle(DesignTokens.textTertiary)
+                HStack(spacing: 4) {
+                    if let mins = step.estimatedMinutes, mins > 0 {
+                        Text(String(localized: "\(mins) min"))
+                            .font(.system(size: 10))
+                            .foregroundStyle(DesignTokens.textTertiary)
+                    }
+                    // Phase 16: Per-step category chip
+                    if let stepCat = step.category {
+                        HStack(spacing: 2) {
+                            Image(systemName: stepCat.icon)
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(stepCat.primaryColor)
+                            Text(stepCat.label)
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(stepCat.primaryColor)
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            Capsule()
+                                .fill(stepCat.primaryColor.opacity(0.12))
+                        )
+                    }
                 }
             }
             
@@ -423,6 +508,7 @@ struct RoutineEditorView: View {
                     .foregroundStyle(DesignTokens.textTertiary)
             }
             .buttonStyle(.plain)
+            .nudgeAccessibility(label: String(localized: "Delete step"), hint: nil, traits: .isButton)
         }
         .padding(DesignTokens.spacingSM)
         .padding(.horizontal, DesignTokens.spacingXS)
@@ -433,12 +519,7 @@ struct RoutineEditorView: View {
     
     private var deleteSection: some View {
         Button(role: .destructive) {
-            if let routine {
-                modelContext.delete(routine)
-                try? modelContext.save()
-                HapticService.shared.actionButtonTap()
-                dismiss()
-            }
+            showDeleteConfirmation = true
         } label: {
             HStack {
                 Image(systemName: "trash")
@@ -455,6 +536,22 @@ struct RoutineEditorView: View {
         }
         .buttonStyle(.plain)
         .padding(.top, DesignTokens.spacingLG)
+        .confirmationDialog(
+            String(localized: "Delete this routine?"),
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "Delete Routine"), role: .destructive) {
+                if let routine {
+                    modelContext.delete(routine)
+                    do { try modelContext.save() } catch { Log.ui.error("[RoutineEditor] Delete save failed: \(error, privacy: .public)") }
+                    HapticService.shared.actionButtonTap()
+                    dismiss()
+                }
+            }
+        } message: {
+            Text(String(localized: "This action cannot be undone."))
+        }
     }
     
     // MARK: - Actions
@@ -469,6 +566,7 @@ struct RoutineEditorView: View {
         startMinute = routine.startMinute
         colorHex = routine.colorHex ?? "007AFF"
         steps = routine.steps
+        selectedCategory = routine.category
     }
     
     private func addStep() {
@@ -509,6 +607,7 @@ struct RoutineEditorView: View {
             routine.startMinute = startMinute
             routine.colorHex = colorHex
             routine.steps = steps
+            routine.categoryRaw = selectedCategory?.rawValue
         } else {
             // Create new
             let newRoutine = Routine(
@@ -518,13 +617,14 @@ struct RoutineEditorView: View {
                 startHour: startHour,
                 startMinute: startMinute,
                 steps: steps,
-                colorHex: colorHex
+                colorHex: colorHex,
+                categoryRaw: selectedCategory?.rawValue
             )
             newRoutine.customDays = Array(customDays)
             modelContext.insert(newRoutine)
         }
         
-        try? modelContext.save()
+        do { try modelContext.save() } catch { Log.ui.error("[RoutineEditor] Save failed: \(error, privacy: .public)") }
         HapticService.shared.swipeDone()
         dismiss()
     }

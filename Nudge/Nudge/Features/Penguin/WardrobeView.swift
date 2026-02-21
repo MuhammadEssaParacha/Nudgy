@@ -3,7 +3,7 @@
 //  Nudge
 //
 //  Accessory shop & equip screen.
-//  Browse unlocked and locked accessories, spend snowflakes to unlock,
+//  Browse unlocked and locked accessories, spend fish to unlock,
 //  and equip items on Nudgy with instant preview.
 //
 //  Presented as a sheet from the penguin's home screen.
@@ -76,7 +76,7 @@ struct WardrobeView: View {
         ) {
             if let id = selectedAccessory {
                 let cost = AccessoryCatalog.cost(for: id)
-                Button(String(localized: "Unlock for \(cost) ❄️")) {
+                Button(String(localized: "Unlock for \(cost) 🐟")) {
                     performUnlock(id)
                 }
                 Button(String(localized: "Cancel"), role: .cancel) {}
@@ -101,7 +101,7 @@ struct WardrobeView: View {
         }
         for tier in 1...4 {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.25 + Double(tier) * 0.08)) {
-                tiersAppeared.insert(tier)
+                _ = tiersAppeared.insert(tier)
             }
         }
     }
@@ -193,10 +193,10 @@ struct WardrobeView: View {
     private var statsBar: some View {
         HStack(spacing: 0) {
             statBadge(
-                icon: "snowflake",
-                gradient: [Color(hex: "00D4FF"), Color(hex: "7BB8FF")],
-                value: "\(rewardService.snowflakes)",
-                label: String(localized: "Snowflakes")
+                icon: "fish.fill",
+                gradient: [Color(hex: "FFB800"), Color(hex: "FF8C00")],
+                value: "\(rewardService.fish)",
+                label: String(localized: "Fish")
             )
 
             thinDivider
@@ -277,7 +277,7 @@ struct WardrobeView: View {
                     Spacer()
 
                     HStack(spacing: 3) {
-                        Image(systemName: "snowflake")
+                        Image(systemName: "fish.fill")
                             .font(.system(size: 8, weight: .medium))
                         Text(tierCost(tier))
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -359,7 +359,7 @@ struct WardrobeView: View {
     private func accessoryCell(_ item: NudgyAccessoryItem, tier: Int) -> some View {
         let isUnlocked = rewardService.unlockedAccessories.contains(item.id)
         let isEquipped = rewardService.equippedAccessories.contains(item.id)
-        let canAfford = rewardService.snowflakes >= AccessoryCatalog.cost(for: item.id)
+        let canAfford = rewardService.fish >= AccessoryCatalog.cost(for: item.id)
         let tColor = tierColor(tier)
         
         return Button {
@@ -375,11 +375,12 @@ struct WardrobeView: View {
             }
         } label: {
             VStack(spacing: 6) {
-                // Emoji/icon container
+                // Icon container
                 ZStack {
                     if isUnlocked {
-                        Text(AccessoryCatalog.emoji(for: item.id))
-                            .font(.system(size: 32))
+                        Image(systemName: AccessoryCatalog.icon(for: item.id))
+                            .font(.system(size: 26, weight: .semibold))
+                            .foregroundStyle(tColor)
                     } else {
                         VStack(spacing: 3) {
                             Image(systemName: "lock.fill")
@@ -390,7 +391,7 @@ struct WardrobeView: View {
                                         : DesignTokens.textTertiary.opacity(0.5)
                                 )
                             HStack(spacing: 1) {
-                                Image(systemName: "snowflake")
+                                Image(systemName: "fish.fill")
                                     .font(.system(size: 7))
                                 Text("\(AccessoryCatalog.cost(for: item.id))")
                                     .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -453,7 +454,7 @@ struct WardrobeView: View {
                 ? (isEquipped
                     ? String(localized: "Tap to unequip")
                     : String(localized: "Tap to equip"))
-                : String(localized: "Locked. Costs \(AccessoryCatalog.cost(for: item.id)) snowflakes to unlock"),
+                : String(localized: "Locked. Costs \(AccessoryCatalog.cost(for: item.id)) fish to unlock"),
             traits: .isButton
         )
     }

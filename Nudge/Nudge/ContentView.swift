@@ -10,6 +10,7 @@
 import SwiftUI
 import CoreSpotlight
 import SwiftData
+import os
 
 // MARK: - Tab Definition
 
@@ -141,6 +142,7 @@ struct ContentView: View {
             handleNotificationAction(notification)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            WidgetDataService.processPendingActions(using: modelContext)
             refreshActiveCount()
         }
         .onReceive(NotificationCenter.default.publisher(for: .nudgeAddToCalendar)) { notification in
@@ -169,7 +171,7 @@ struct ContentView: View {
             // Tactile feedback on tab switch — ice tap sound + soft haptic
             if oldTab != newTab {
                 SoundService.shared.playTabSwitch()
-                HapticService.shared.prepare()
+                HapticService.shared.swipeSkip()
             }
             refreshActiveCount()
         }
@@ -179,7 +181,7 @@ struct ContentView: View {
         .onContinueUserActivity(CSSearchableItemActionType) { activity in
             // Handle Spotlight search result tap
             guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
-                  let uuid = UUID(uuidString: identifier) else { return }
+                  let _ = UUID(uuidString: identifier) else { return }
             // Navigate to the task
             selectedTab = .nudges
             NotificationCenter.default.post(
@@ -249,6 +251,10 @@ struct ContentView: View {
         case .active:   accentHex = "0A84FF"
         }
         
+        let cat = topItem.resolvedCategory
+        let catLabel = cat != .general ? cat.label : nil
+        let catHex = cat != .general ? cat.primaryColorHex : nil
+        
         if LiveActivityManager.shared.isRunning {
             // Update existing
             Task {
@@ -258,19 +264,25 @@ struct ContentView: View {
                     queuePosition: 1,
                     queueTotal: queue.count,
                     accentHex: accentHex,
-                    taskID: topItem.id.uuidString
+                    taskID: topItem.id.uuidString,
+                    categoryLabel: catLabel,
+                    categoryColorHex: catHex
                 )
             }
         } else {
             // Start new
-            LiveActivityManager.shared.start(
-                taskContent: topItem.content,
-                taskEmoji: emoji,
-                queuePosition: 1,
-                queueTotal: queue.count,
-                accentHex: accentHex,
-                taskID: topItem.id.uuidString
-            )
+            Task {
+                await LiveActivityManager.shared.start(
+                    taskContent: topItem.content,
+                    taskEmoji: emoji,
+                    queuePosition: 1,
+                    queueTotal: queue.count,
+                    accentHex: accentHex,
+                    taskID: topItem.id.uuidString,
+                    categoryLabel: catLabel,
+                    categoryColorHex: catHex
+                )
+            }
         }
     }
 
@@ -289,7 +301,7 @@ struct ContentView: View {
         switch action {
         case "markDone":
             repository?.markDone(item)
-            HapticService.shared.swipeDone()
+            HapticService.shared.completionHaptic(for: item.resolvedCategory)
         case "snoozeTomorrow":
             repository?.snooze(item, until: .tomorrowMorning)
         case "call":
@@ -316,7 +328,10 @@ struct ContentView: View {
         Task {
             if let eventID = await CalendarService.shared.createEvent(from: item) {
                 HapticService.shared.swipeDone()
-                print("📅 Created calendar event: \(eventID)")
+                Log.ui.info("Created calendar event: \(eventID)")
+            } else {
+                HapticService.shared.error()
+                Log.ui.error("Failed to create calendar event for item: \(item.content)")
             }
         }
     }
@@ -367,7 +382,7 @@ struct ContentView: View {
         switch action {
         case "markDone":
             repository?.markDone(item)
-            HapticService.shared.swipeDone()
+            HapticService.shared.completionHaptic(for: item.resolvedCategory)
             SoundService.shared.playTaskDone()
         case "snoozeTomorrow":
             repository?.snooze(item, until: .tomorrowMorning)

@@ -10,6 +10,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.tarsitgroup.nudge.liveActivityRefresh</string>
+		<string>com.tarsitgroup.nudge.smartReorder</string>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Nudge uses the microphone so you can brain dump your thoughts by speaking instead of typing.</string>
@@ -19,6 +20,14 @@
 	<string>Nudge can look up contacts so you can quickly call or message someone from a task card.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Nudge shows your calendar events alongside tasks in the timeline view so you can see your full day at a glance.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Nudge can import your existing reminders so you can manage everything in one place.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Nudge can surface tasks when you’re near their location — like reminding you to pick up groceries when you’re at the store.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Nudge reads your step count to suggest task energy levels — low-energy tasks when you’ve been active, high-energy when you’re fresh.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Nudge records your focus timer sessions as Mindful Minutes in Apple Health so you can track your productivity.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>com.tarsitgroup.nudge.viewTask</string>
@@ -27,6 +36,24 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.tarsitgroup.nudge</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nudge</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tel</string>
+		<string>mailto</string>
+		<string>sms</string>
+		<string>maps</string>
+	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>

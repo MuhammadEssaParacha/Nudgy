@@ -10,6 +10,76 @@
 
 import Foundation
 import SwiftData
+import os
+
+// MARK: - Category Nudge Context
+
+/// Phase 14: Category-aware context for proactive nudges.
+/// Groups overdue/stale items by category so Nudgy can reference specific categories.
+struct CategoryNudgeContext {
+    struct CategoryCount {
+        let category: TaskCategory
+        let count: Int
+    }
+    /// Categories with overdue tasks, sorted by count descending.
+    let overdueCategories: [CategoryCount]
+    /// Categories with stale tasks, sorted by count descending.
+    let staleCategories: [CategoryCount]
+    /// Category the user has been thriving in (most completions recently).
+    let thrivingCategory: TaskCategory?
+    /// Categories with items but zero completions (needs attention).
+    let neglectedCategories: [TaskCategory]
+    
+    /// Build from active items and done-today items.
+    static func build(from activeItems: [NudgeItem], doneToday: [NudgeItem]) -> CategoryNudgeContext {
+        // Overdue by category
+        var overdueByCat: [TaskCategory: Int] = [:]
+        var staleByCat: [TaskCategory: Int] = [:]
+        
+        for item in activeItems {
+            let cat = item.resolvedCategory
+            if let due = item.dueDate, due < .now {
+                overdueByCat[cat, default: 0] += 1
+            }
+            if item.isCategoryStale {
+                staleByCat[cat, default: 0] += 1
+            }
+        }
+        
+        let overdue = overdueByCat
+            .map { CategoryCount(category: $0.key, count: $0.value) }
+            .sorted { $0.count > $1.count }
+        
+        let stale = staleByCat
+            .map { CategoryCount(category: $0.key, count: $0.value) }
+            .sorted { $0.count > $1.count }
+        
+        // Thriving = category with most completions today
+        var doneByCat: [TaskCategory: Int] = [:]
+        for item in doneToday {
+            doneByCat[item.resolvedCategory, default: 0] += 1
+        }
+        let thriving = doneByCat
+            .filter { $0.value >= 2 }
+            .max(by: { $0.value < $1.value })?.key
+        
+        // Neglected = categories with active items but zero done today
+        let activeCategories = Set(activeItems.map(\.resolvedCategory)).subtracting([.general])
+        let doneCategories = Set(doneToday.map(\.resolvedCategory))
+        let neglected = Array(activeCategories.subtracting(doneCategories))
+            .filter { cat in
+                // Only flag if 3+ active items in this category
+                activeItems.filter { $0.resolvedCategory == cat }.count >= 3
+            }
+        
+        return CategoryNudgeContext(
+            overdueCategories: overdue,
+            staleCategories: stale,
+            thrivingCategory: thriving,
+            neglectedCategories: neglected
+        )
+    }
+}
 
 // MARK: - NudgyStateAdapter
 
@@ -24,11 +94,36 @@ final class NudgyStateAdapter {
     /// Expose connected state for NudgyEngine facade access.
     var connectedState: PenguinState? { penguinState }
     
+    // MARK: - ADHD Profile Settings
+    
+    /// Set by NudgyEngine.syncADHDProfile() — avoids direct AppSettings dependency.
+    private var medicationEnabled: Bool = false
+    private var medicationTime: Date = Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: .now) ?? Date()
+    
+    // Phase 12: Track per-task snooze counts for body-doubling suggestion
+    private var snoozeCountByTask: [String: Int] = [:]
+    
+    // Phase 13: Track completions this session for mood check-in
+    private var completionsThisSession: Int = 0
+    
+    /// Persisted to UserDefaults so the "once per day" mood check-in guard survives app restarts.
+    private var lastMoodCheckInDate: Date {
+        get { (UserDefaults.standard.object(forKey: "nudgy_lastMoodCheckInDate") as? Date) ?? .distantPast }
+        set { UserDefaults.standard.set(newValue, forKey: "nudgy_lastMoodCheckInDate") }
+    }
+    
     private init() {}
     
     /// Connect to the PenguinState instance (call once at app launch).
     func connect(to state: PenguinState) {
         self.penguinState = state
+    }
+    
+    /// Configure ADHD profile settings from AppSettings.
+    /// Called by NudgyEngine.syncADHDProfile() on bootstrap and profile changes.
+    func configure(settings: AppSettings) {
+        medicationEnabled = settings.medicationEnabled
+        medicationTime = settings.medicationTime
     }
     
     // MARK: - Conversation Flow
@@ -45,7 +140,7 @@ final class NudgyStateAdapter {
         state.streamingText = ""
         
         Task {
-            print("🧠 StateAdapter: Sending to LLM: '\(text.prefix(80))'")
+            Log.ai.debug("StateAdapter: Sending to LLM: '\(text.prefix(80))'")
             
             let response = await NudgyConversationManager.shared.sendStreaming(
                 text,
@@ -59,7 +154,7 @@ final class NudgyStateAdapter {
             }
             
             guard let state = self.penguinState else {
-                print("🧠 StateAdapter: penguinState is nil after LLM call!")
+                Log.ai.warning("StateAdapter: penguinState is nil after LLM call!")
                 return
             }
             
@@ -80,9 +175,7 @@ final class NudgyStateAdapter {
                 case .taskSnoozed(let content):
                     state.addSystemMessage("💤 Snoozed: \(content)")
                 case .memoryLearned(let fact, _):
-                    #if DEBUG
-                    print("🧠 Learned: \(fact)")
-                    #endif
+                    Log.ai.debug("Learned: \(fact)")
                 case .actionExecuted(let actionType, let target):
                     let icon = switch actionType {
                     case "CALL": "📞"
@@ -90,6 +183,7 @@ final class NudgyStateAdapter {
                     case "EMAIL": "📧"
                     case "SEARCH": "🔍"
                     case "NAVIGATE": "🗺️"
+                    case "ALARM": "⏰"
                     default: "⚡"
                     }
                     state.addSystemMessage("\(icon) Executing: \(actionType.lowercased()) → \(target)")
@@ -116,7 +210,7 @@ final class NudgyStateAdapter {
             
             // Finalize response
             let responseText = response.text.isEmpty ? state.streamingText : response.text
-            print("🧠 StateAdapter: Got response (\(responseText.count) chars, \(taskCount) tasks): '\(responseText.prefix(100))'")
+            Log.ai.debug("StateAdapter: Got response (\(responseText.count) chars, \(taskCount) tasks): '\(responseText.prefix(100))'")
             
             if !responseText.isEmpty {
                 state.addNudgyMessage(responseText)
@@ -133,14 +227,14 @@ final class NudgyStateAdapter {
                 NudgyVoiceOutput.shared.prepareForPlayback()
                 
                 // Speak aloud
-                print("🧠 StateAdapter: Speaking response aloud")
+                Log.ai.debug("StateAdapter: Speaking response aloud")
                 let willSpeak = NudgyVoiceOutput.shared.speak(responseText)
                 
                 // If TTS was skipped (voice disabled or empty text), post a notification
                 // so the voice conversation loop can auto-resume listening without
                 // waiting for isSpeaking to transition.
                 if !willSpeak && state.isVoiceConversationActive {
-                    print("🧠 StateAdapter: TTS skipped, posting ttsSkipped notification")
+                    Log.ai.debug("StateAdapter: TTS skipped, posting ttsSkipped notification")
                     // Brief delay to let UI settle, then notify
                     try? await Task.sleep(for: .milliseconds(300))
                     NotificationCenter.default.post(name: .nudgyTTSSkipped, object: nil)
@@ -162,7 +256,8 @@ final class NudgyStateAdapter {
     // MARK: - Greeting
     
     /// Show a smart greeting through PenguinState.
-    func greet(userName: String?, activeTaskCount: Int, overdueCount: Int = 0, staleCount: Int = 0, doneToday: Int = 0) {
+    /// Phase 14: Added categoryContext for category-aware proactive nudges.
+    func greet(userName: String?, activeTaskCount: Int, overdueCount: Int = 0, staleCount: Int = 0, doneToday: Int = 0, topCategory: (label: String, emoji: String, count: Int)? = nil, categoryContext: CategoryNudgeContext? = nil) {
         guard let state = penguinState else { return }
         
         state.interactionMode = .greeting
@@ -170,7 +265,8 @@ final class NudgyStateAdapter {
         
         let instant = NudgyReactionEngine.shared.greeting(
             userName: userName,
-            activeTaskCount: activeTaskCount
+            activeTaskCount: activeTaskCount,
+            topCategory: topCategory
         ) { [weak state] upgraded in
             guard let state, state.interactionMode == .greeting else { return }
             state.say(upgraded, style: .speech, autoDismiss: 5.0)
@@ -199,7 +295,20 @@ final class NudgyStateAdapter {
                 try? await Task.sleep(for: .seconds(5))
                 guard let state = self.penguinState,
                       state.interactionMode == .ambient else { return }
-                self.proactiveNudge(overdueCount: overdueCount, staleCount: staleCount, doneToday: doneToday, activeCount: activeTaskCount)
+                self.proactiveNudge(overdueCount: overdueCount, staleCount: staleCount, doneToday: doneToday, activeCount: activeTaskCount, categoryContext: categoryContext)
+            }
+        }
+        
+        // Phase 10: Medication focus-window hint (fires after greeting settles)
+        if medicationEnabled {
+            let medTime = medicationTime
+            Task {
+                try? await Task.sleep(for: .seconds(NudgyConfig.Personality.greetingSettleDelay + 3.0))
+                guard let state = self.penguinState else { return }
+                if let hint = NudgyADHDKnowledge.MedicationAwareness.focusWindowMessage(medicationTime: medTime) {
+                    state.say(hint, style: .whisper, autoDismiss: 5.0)
+                    state.addNudgyMessage(hint)
+                }
             }
         }
     }
@@ -207,7 +316,7 @@ final class NudgyStateAdapter {
     // MARK: - Reactions
     
     /// React to task completion.
-    func reactToCompletion(taskContent: String?, remainingCount: Int) {
+    func reactToCompletion(taskContent: String?, remainingCount: Int, categoryLabel: String? = nil) {
         guard let state = penguinState else { return }
         
         state.expression = .happy
@@ -215,7 +324,8 @@ final class NudgyStateAdapter {
         
         let instant = NudgyReactionEngine.shared.completionReaction(
             taskContent: taskContent,
-            remainingCount: remainingCount
+            remainingCount: remainingCount,
+            categoryLabel: categoryLabel
         ) { [weak state] upgraded in
             guard let state, state.expression == .happy else { return }
             state.say(upgraded, style: .speech, autoDismiss: 3.0)
@@ -230,6 +340,23 @@ final class NudgyStateAdapter {
             guard let state = self.penguinState else { return }
             if state.expression == .happy {
                 state.expression = .idle
+            }
+        }
+        
+        // Phase 13: Track session completions — gentle mood check-in at 5
+        completionsThisSession += 1
+        if completionsThisSession == 5 {
+            let count = completionsThisSession
+            let daysSinceMoodCheck = Calendar.current.dateComponents([.day], from: lastMoodCheckInDate, to: .now).day ?? 999
+            guard daysSinceMoodCheck >= 1 else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(4.0))
+                guard let state = self.penguinState,
+                      state.expression != .listening else { return }
+                let msg = String(localized: "*sits quietly beside you* …You've done \(count) things. That's a lot. …How are you actually feeling? 💙")
+                state.say(msg, style: .whisper, autoDismiss: 8.0)
+                state.addNudgyMessage(msg)
+                self.lastMoodCheckInDate = .now
             }
         }
     }
@@ -256,6 +383,22 @@ final class NudgyStateAdapter {
             guard let state = self.penguinState else { return }
             if state.expression == .thumbsUp {
                 state.expression = .idle
+            }
+        }
+        
+        // Phase 12: Track snooze count per task — suggest body doubling at 3
+        if let content = taskContent {
+            snoozeCountByTask[content, default: 0] += 1
+            let count = snoozeCountByTask[content] ?? 0
+            if count == 3 {
+                Task {
+                    try? await Task.sleep(for: .seconds(3.5))
+                    guard let state = self.penguinState,
+                          state.expression != .listening else { return }
+                    let msg = String(localized: "Hmm. This one keeps coming back. …What if I just sat here while you did it? I won't say anything. I'll just be here 🧊")
+                    state.say(msg, style: .whisper, autoDismiss: 8.0)
+                    state.addNudgyMessage(msg)
+                }
             }
         }
     }
@@ -306,7 +449,14 @@ final class NudgyStateAdapter {
         state.currentTaskEmoji = emoji
         state.queuePositionText = "\(position) of \(total)"
         state.interactionMode = .presentingTask
-        state.expression = .idle
+        
+        // Phase 19: Brief waving pulse on task transition (feels alive, not static)
+        state.expression = .waving
+        Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let state = self.penguinState, state.expression == .waving else { return }
+            state.expression = .idle
+        }
         
         let instant = NudgyReactionEngine.shared.taskPresentation(
             content: content, position: position, total: total,
@@ -380,20 +530,35 @@ final class NudgyStateAdapter {
     
     /// Proactive nudges now enter chat mode so the user can respond.
     /// They feel like Nudgy initiating a conversation, not a notification.
-    private func proactiveNudge(overdueCount: Int, staleCount: Int, doneToday: Int, activeCount: Int) {
+    /// Phase 14: Category-aware — mentions specific categories that need attention.
+    private func proactiveNudge(overdueCount: Int, staleCount: Int, doneToday: Int, activeCount: Int, categoryContext: CategoryNudgeContext? = nil) {
         guard let state = penguinState else { return }
         
         let line: String
         if overdueCount > 0 {
             state.expression = .nudging
-            line = overdueCount == 1
-                ? String(localized: "Hey… one thing is overdue. Want to look at it together? 💙")
-                : String(localized: "\(overdueCount) things have been waiting. …Pick the easiest one? 💙")
+            if let ctx = categoryContext, let topOverdue = ctx.overdueCategories.first {
+                let cat = topOverdue.category
+                line = overdueCount == 1
+                    ? String(localized: "Hey… that \(cat.label.lowercased()) thing is overdue. Want to look at it? \(cat.emoji)")
+                    : String(localized: "\(overdueCount) things waiting — mostly \(cat.label.lowercased()). …Pick the easiest one? \(cat.emoji)")
+            } else {
+                line = overdueCount == 1
+                    ? String(localized: "Hey… one thing is overdue. Want to look at it together? 💙")
+                    : String(localized: "\(overdueCount) things have been waiting. …Pick the easiest one? 💙")
+            }
         } else if staleCount > 0 {
             state.expression = .thinking
-            line = staleCount == 1
-                ? String(localized: "One thing has been sitting a while. …Still need it? 🧊")
-                : String(localized: "\(staleCount) things haven't moved in a few days. …Want to sort through them? 🧊")
+            if let ctx = categoryContext, let topStale = ctx.staleCategories.first {
+                let cat = topStale.category
+                line = staleCount == 1
+                    ? String(localized: "That \(cat.label.lowercased()) task has been sitting a while. …Still need it? \(cat.emoji)")
+                    : String(localized: "\(staleCount) things haven't moved — \(cat.label.lowercased()) especially. …Want to sort through them? \(cat.emoji)")
+            } else {
+                line = staleCount == 1
+                    ? String(localized: "One thing has been sitting a while. …Still need it? 🧊")
+                    : String(localized: "\(staleCount) things haven't moved in a few days. …Want to sort through them? 🧊")
+            }
         } else {
             return
         }

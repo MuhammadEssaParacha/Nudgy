@@ -134,7 +134,9 @@ struct InlineMicroSteps: View {
                 // All-done celebration
                 if allComplete {
                     HStack(spacing: DesignTokens.spacingSM) {
-                        Text("✨")
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DesignTokens.accentComplete)
                             .font(.system(size: 14))
                         Text(String(localized: "All steps done — marking complete!"))
                             .font(.system(size: 12, weight: .medium))
@@ -233,9 +235,9 @@ struct MicroStepRow: View {
 enum MicroStepGenerator {
     
     /// Generate 2-3 micro-steps for a task.
-    /// Tries AI first, falls back to NudgyADHDKnowledge heuristics.
-    static func generate(for taskContent: String, emoji: String?) async -> [MicroStep] {
-        // Try AI breakdown first
+    /// Three-tier fallback: AI → CategoryTemplate defaults → keyword heuristic.
+    static func generate(for taskContent: String, emoji: String?, category: TaskCategory? = nil) async -> [MicroStep] {
+        // Tier 1: Try AI breakdown first
         if AIService.shared.isAvailable {
             do {
                 let breakdown = try await AIService.shared.breakDownTask(taskContent)
@@ -244,11 +246,21 @@ enum MicroStepGenerator {
                     MicroStep(content: step.task, emoji: step.emoji)
                 }
             } catch {
-                // Fall through to heuristic
+                // Fall through to category template
             }
         }
         
-        // Heuristic fallback — keyword-based micro-steps
+        // Tier 2: Category template micro-steps (curated per life area)
+        if let cat = category, cat != .general {
+            let templateSteps = CategoryTemplateRegistry.template(for: cat).defaultMicroSteps
+            if !templateSteps.isEmpty {
+                return templateSteps.prefix(3).map { step in
+                    MicroStep(content: step, emoji: cat.icon)
+                }
+            }
+        }
+        
+        // Tier 3: Keyword heuristic fallback
         return heuristicSteps(for: taskContent, emoji: emoji)
     }
     

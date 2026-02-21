@@ -205,7 +205,8 @@ struct AmbientFishScene: View {
                     fish[idx].opacity = 0
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.6))
                 fish = Array(fish.prefix(target))
             }
         }
@@ -253,8 +254,8 @@ struct AmbientFishScene: View {
         Color.black.ignoresSafeArea()
         AmbientFishScene(
             fishEarned: 4,
-            sceneWidth: UIScreen.main.bounds.width,
-            sceneHeight: UIScreen.main.bounds.height
+            sceneWidth: 393,
+            sceneHeight: 852
         )
     }
 }

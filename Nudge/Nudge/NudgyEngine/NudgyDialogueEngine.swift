@@ -20,19 +20,35 @@ final class NudgyDialogueEngine {
     static let shared = NudgyDialogueEngine()
     private init() {}
     
+    // MARK: - Active ADHD Profile
+    
+    /// Set by NudgyEngine.syncADHDProfile() on bootstrap and settings change.
+    var activeAgeGroup: AgeGroup = .adult
+    var activePersonalityMode: NudgyPersonalityMode = .gentle
+    
+    /// Update the active ADHD profile — call whenever settings change.
+    func configure(ageGroup: AgeGroup, personalityMode: NudgyPersonalityMode) {
+        activeAgeGroup = ageGroup
+        activePersonalityMode = personalityMode
+    }
+    
     // MARK: - Greeting
     
     /// Curated greeting (instant, no AI).
-    func curatedGreeting(userName: String?, activeTaskCount: Int) -> String {
+    func curatedGreeting(userName: String?, activeTaskCount: Int, topCategory: (label: String, emoji: String, count: Int)? = nil) -> String {
         let name = userName.flatMap { $0.isEmpty ? nil : $0 }
         let hour = Calendar.current.component(.hour, from: .now)
         
+        // Phase 8: Age-adaptive line selection
         let lines: [String]
-        switch hour {
-        case 5..<12: lines = NudgyPersonality.CuratedLines.greetingMorning
-        case 12..<17: lines = NudgyPersonality.CuratedLines.greetingAfternoon
-        case 17..<21: lines = NudgyPersonality.CuratedLines.greetingEvening
-        default: lines = NudgyPersonality.CuratedLines.greetingLateNight
+        switch (activeAgeGroup, hour) {
+        case (.child, 5..<21):  lines = NudgyPersonality.CuratedLines.greetingMorningChild
+        case (.teen, 5..<12):   lines = NudgyPersonality.CuratedLines.greetingMorningTeen
+        case (.teen, _):        lines = NudgyPersonality.CuratedLines.greetingMorningTeen
+        case (_, 5..<12):       lines = NudgyPersonality.CuratedLines.greetingMorning
+        case (_, 12..<17):      lines = NudgyPersonality.CuratedLines.greetingAfternoon
+        case (_, 17..<21):      lines = NudgyPersonality.CuratedLines.greetingEvening
+        default:                lines = NudgyPersonality.CuratedLines.greetingLateNight
         }
         
         var greeting = lines.randomElement()!
@@ -49,11 +65,24 @@ final class NudgyDialogueEngine {
         if activeTaskCount == 0 {
             greeting += " " + String(localized: "Nothing waiting. …That's kind of nice.")
         } else if activeTaskCount == 1 {
-            greeting += " " + String(localized: "Just one thing today. Simple.")
+            // Category-aware single task
+            if let top = topCategory {
+                greeting += " " + String(localized: "Just one \(top.label.lowercased()) thing. Simple \(top.emoji)")
+            } else {
+                greeting += " " + String(localized: "Just one thing today. Simple.")
+            }
         } else if activeTaskCount <= 3 {
-            greeting += " " + String(localized: "\(activeTaskCount) things. …One at a time, though.")
+            if let top = topCategory, top.count >= 2 {
+                greeting += " " + String(localized: "\(activeTaskCount) things — mostly \(top.label.lowercased()) \(top.emoji). …One at a time.")
+            } else {
+                greeting += " " + String(localized: "\(activeTaskCount) things. …One at a time, though.")
+            }
         } else {
-            greeting += " " + String(localized: "\(activeTaskCount) things waiting. …But just the next one matters.")
+            if let top = topCategory, top.count >= 2 {
+                greeting += " " + String(localized: "\(activeTaskCount) things — \(top.count) \(top.label.lowercased()) \(top.emoji). …Just the next one matters.")
+            } else {
+                greeting += " " + String(localized: "\(activeTaskCount) things waiting. …But just the next one matters.")
+            }
         }
         
         return greeting
@@ -89,14 +118,24 @@ final class NudgyDialogueEngine {
     
     // MARK: - Task Reactions
     
-    /// Curated completion acknowledgment (gentle, not hype).
+    /// Curated completion acknowledgment — Phase 16: personality-mode aware.
     func curatedCompletionReaction(remainingCount: Int) -> String {
         if remainingCount == 0 {
             return NudgyPersonality.CuratedLines.allDoneCelebrations.randomElement()!
-        } else if remainingCount == 1 {
-            return String(localized: "One more. …Whenever you're ready 💙")
         }
-        return NudgyPersonality.CuratedLines.completionCelebrations.randomElement()!
+        switch activePersonalityMode {
+        case .coach:
+            return NudgyPersonality.CuratedLines.completionCoach.randomElement()!
+        case .silly:
+            return NudgyPersonality.CuratedLines.completionSilly.randomElement()!
+        case .quiet:
+            return NudgyPersonality.CuratedLines.completionQuiet.randomElement()!
+        case .gentle:
+            if remainingCount == 1 {
+                return String(localized: "One more. …Whenever you're ready 💙")
+            }
+            return NudgyPersonality.CuratedLines.completionCelebrations.randomElement()!
+        }
     }
     
     /// AI-powered completion acknowledgment.
@@ -116,9 +155,14 @@ final class NudgyDialogueEngine {
         return curatedCompletionReaction(remainingCount: remainingCount)
     }
     
-    /// Curated snooze reaction.
+    /// Curated snooze reaction — Phase 16: personality-mode aware.
     func curatedSnoozeReaction() -> String {
-        NudgyPersonality.CuratedLines.snoozeReactions.randomElement()!
+        switch activePersonalityMode {
+        case .coach:  return NudgyPersonality.CuratedLines.snoozeCoach.randomElement()!
+        case .silly:  return NudgyPersonality.CuratedLines.snoozeSilly.randomElement()!
+        case .quiet:  return NudgyPersonality.CuratedLines.snoozeQuiet.randomElement()!
+        case .gentle: return NudgyPersonality.CuratedLines.snoozeReactions.randomElement()!
+        }
     }
     
     /// AI-powered snooze reaction.
@@ -158,10 +202,20 @@ final class NudgyDialogueEngine {
     
     // MARK: - Idle Chatter
     
-    /// AI-powered idle chatter.
+    /// AI-powered idle chatter — Phase 16: personality-mode aware fallback.
     func smartIdleChatter(currentTask: String?, activeCount: Int) async -> String {
-        guard NudgyConfig.isAvailable else {
-            return NudgyPersonality.CuratedLines.idleChatter.randomElement()!
+        // Build mode-aware fallback first
+        let fallback: String
+        switch activePersonalityMode {
+        case .coach:  fallback = NudgyPersonality.CuratedLines.idleCoach.randomElement()!
+        case .silly:  fallback = NudgyPersonality.CuratedLines.idleSilly.randomElement()!
+        case .quiet:  fallback = NudgyPersonality.CuratedLines.idleQuiet.randomElement()!
+        case .gentle: fallback = NudgyPersonality.CuratedLines.idleChatter.randomElement()!
+        }
+        
+        // Quiet mode never generates AI idle chatter — just presence
+        guard NudgyConfig.isAvailable, activePersonalityMode != .quiet else {
+            return fallback
         }
         
         let hour = Calendar.current.component(.hour, from: .now)
@@ -181,7 +235,7 @@ final class NudgyDialogueEngine {
         if let response = await NudgyConversationManager.shared.generateOneShotResponse(prompt: prompt) {
             return response
         }
-        return NudgyPersonality.CuratedLines.idleChatter.randomElement()!
+        return fallback
     }
     
     // MARK: - Task Presentation

@@ -126,6 +126,19 @@ enum AnimationConstants {
     /// Cross-fade between views
     static let tabTransition: Animation = .easeOut(duration: 0.25)
     
+    // MARK: Card Transition (Done → Next Up)
+    
+    /// Undo toast slide-in
+    static let undoToast: Animation = .spring(response: 0.4, dampingFraction: 0.85)
+    
+    /// Card asymmetric transition: slide up + fade in, fade out on removal
+    static var cardTransition: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: cardAppearOffset)).animation(cardAppear),
+            removal: .opacity.animation(.easeOut(duration: 0.15))
+        )
+    }
+    
     // MARK: Overlays & Sheets
     
     /// Snooze picker slide-up
@@ -134,6 +147,12 @@ enum AnimationConstants {
     /// General-purpose smooth spring for UI state toggles
     static let springSmooth: Animation = .spring(response: 0.35, dampingFraction: 0.8)
     
+    /// Quick, crisp spring for selection feedback (filter chips, toggles)
+    static let springSnappy: Animation = .spring(response: 0.25, dampingFraction: 0.7)
+
+    /// Bouncy spring for micro-interactions (mood picker, icon taps)
+    static let springBouncy: Animation = .spring(response: 0.3, dampingFraction: 0.6)
+
     /// Onboarding page transition
     static let pageTransition: Animation = .spring(response: 0.5, dampingFraction: 0.8)
     

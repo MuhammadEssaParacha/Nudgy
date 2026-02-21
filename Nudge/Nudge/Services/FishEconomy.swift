@@ -25,6 +25,17 @@ enum FishSpecies: String, CaseIterable, Codable, Sendable {
     case swordfish = "swordfish"
     case whale     = "whale"
     
+    /// SF Symbol icon for fish display.
+    var icon: String {
+        switch self {
+        case .catfish:   return "fish.fill"
+        case .tropical:  return "fish.circle.fill"
+        case .swordfish: return "bolt.horizontal.fill"
+        case .whale:     return "whale.fill"
+        }
+    }
+    
+    /// Deprecated — use `icon` for rendering.
     var emoji: String {
         switch self {
         case .catfish:   return "🐟"
@@ -52,8 +63,8 @@ enum FishSpecies: String, CaseIterable, Codable, Sendable {
         }
     }
     
-    /// Snowflake value of this fish.
-    var snowflakeValue: Int {
+    /// Fish value of this species.
+    var fishValue: Int {
         switch self {
         case .catfish:   return 1
         case .tropical:  return 3
@@ -123,6 +134,92 @@ enum FishSpecies: String, CaseIterable, Codable, Sendable {
         case .whale:     return 7.0
         }
     }
+
+    // MARK: - Evolution Thresholds
+
+    /// Catch counts at which this species evolves to each stage.
+    /// (baby → juvenile → adult → elder → ancient)
+    var evolutionThresholds: [Int] {
+        switch self {
+        case .catfish:   return [1, 10, 40, 120, 350]
+        case .tropical:  return [1, 8,  30, 90,  250]
+        case .swordfish: return [1, 5,  18, 55,  150]
+        case .whale:     return [1, 3,  10, 30,  80]
+        }
+    }
+
+    /// Display size for a given evolution stage (scales from base up to 2.8×).
+    func evolvedDisplaySize(for stage: FishEvolutionStage) -> CGFloat {
+        let base = displaySize
+        switch stage {
+        case .baby:    return base * 0.88
+        case .juvenile: return base * 1.0
+        case .adult:   return base * 1.45
+        case .elder:   return base * 1.90
+        case .ancient: return base * 2.55
+        }
+    }
+
+    /// Swim speed slows down as fish mature.
+    func evolvedSwimSpeed(for stage: FishEvolutionStage) -> Double {
+        switch stage {
+        case .baby:    return swimSpeed * 1.3
+        case .juvenile: return swimSpeed * 1.0
+        case .adult:   return swimSpeed * 0.85
+        case .elder:   return swimSpeed * 0.70
+        case .ancient: return swimSpeed * 0.55
+        }
+    }
+}
+
+// MARK: - Fish Evolution Stage
+
+/// The maturity stage of a fish, determined by total catch count for that species.
+enum FishEvolutionStage: Int, CaseIterable, Codable, Comparable, Sendable {
+    case baby    = 0
+    case juvenile = 1
+    case adult   = 2
+    case elder   = 3
+    case ancient = 4
+
+    static func < (lhs: FishEvolutionStage, rhs: FishEvolutionStage) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    var label: String {
+        switch self {
+        case .baby:    return String(localized: "Baby")
+        case .juvenile: return String(localized: "Juvenile")
+        case .adult:   return String(localized: "Adult")
+        case .elder:   return String(localized: "Elder")
+        case .ancient: return String(localized: "Ancient")
+        }
+    }
+
+    /// Whether this stage emits a persistent glow in the tank.
+    var glows: Bool { self >= .elder }
+
+    /// Glow intensity (0 = none, 1 = full).
+    var glowIntensity: Double {
+        switch self {
+        case .baby, .juvenile, .adult: return 0
+        case .elder:   return 0.35
+        case .ancient: return 0.70
+        }
+    }
+
+    /// Resolve the stage for a given species and total catch count.
+    static func stage(for species: FishSpecies, catchCount: Int) -> FishEvolutionStage {
+        let thresholds = species.evolutionThresholds  // [baby, juvenile, adult, elder, ancient]
+        // thresholds[n] = minimum catches to be at stage n
+        var resolved: FishEvolutionStage = .baby
+        for (index, threshold) in thresholds.enumerated() {
+            if catchCount >= threshold, let stage = FishEvolutionStage(rawValue: index) {
+                resolved = stage
+            }
+        }
+        return resolved
+    }
 }
 
 // MARK: - Fish Catch (a single earned fish)
@@ -186,9 +283,9 @@ enum FishEconomy {
         return .catfish
     }
     
-    /// Calculate snowflakes earned for a fish catch (with streak multiplier).
-    static func snowflakesForCatch(species: FishSpecies, streak: Int, isAllClear: Bool) -> Int {
-        var base = species.snowflakeValue
+    /// Calculate fish earned for a catch (with streak multiplier).
+    static func fishForCatch(species: FishSpecies, streak: Int, isAllClear: Bool) -> Int {
+        var base = species.fishValue
         
         // Streak multiplier: 2x after 3+ days
         if streak >= 3 { base *= 2 }

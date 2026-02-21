@@ -350,7 +350,6 @@ struct MountainLayer: View {
     
     var body: some View {
         GeometryReader { geo in
-            let w = geo.size.width
             let h = geo.size.height
             
             ZStack {

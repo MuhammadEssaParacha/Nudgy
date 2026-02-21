@@ -35,12 +35,18 @@ enum AppTheme {
     /// Small title — section names, form field headings
     static let title3: Font = .system(.title3, design: .rounded, weight: .semibold)
     
+    /// General title — used where title2/title3 are too specific
+    static let title: Font = .system(.title2, design: .rounded, weight: .semibold)
+    
     /// Section headers, button labels
     static let headline: Font = .system(.headline, design: .rounded, weight: .semibold)
     
     /// Body text — descriptions, draft previews
     /// SF Pro (default) for readability — warm headings + clean body = the balance
     static let body: Font = .system(.body, design: .default, weight: .regular)
+    
+    /// Subheadline — slightly smaller body, secondary emphasis
+    static let subheadline: Font = .system(.subheadline, design: .default, weight: .regular)
     
     /// Secondary text — timestamps, metadata, hints
     static let caption: Font = .system(.caption, design: .default, weight: .regular)

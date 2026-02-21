@@ -11,13 +11,13 @@ import Foundation
 @Model
 final class BrainDump {
     
-    var id: UUID
-    var rawTranscript: String
-    var processedAt: Date
+    var id: UUID = UUID()
+    var rawTranscript: String = ""
+    var processedAt: Date = Date()
     
     /// Relationship to the NudgeItems created from this dump
     @Relationship(deleteRule: .nullify, inverse: \NudgeItem.brainDump)
-    var items: [NudgeItem]
+    var items: [NudgeItem] = []
     
     init(rawTranscript: String, items: [NudgeItem] = []) {
         self.id = UUID()

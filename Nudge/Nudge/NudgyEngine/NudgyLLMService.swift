@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import os
 
 // MARK: - LLM Response
 
@@ -124,16 +125,12 @@ final class NudgyLLMService {
                 // Trip circuit breaker if too many failures
                 if consecutiveFailures >= circuitBreakerThreshold {
                     circuitOpenedAt = .now
-                    #if DEBUG
-                    print("🔴 Circuit breaker OPEN — \(consecutiveFailures) consecutive failures. Cooling down \(circuitCooldown)s.")
-                    #endif
+                    Log.ai.error("Circuit breaker OPEN — \(self.consecutiveFailures) consecutive failures. Cooling down \(self.circuitCooldown)s.")
                 }
                 
                 if attempt < maxAttempts {
                     let delay = initialDelay * pow(2, Double(attempt - 1))
-                    #if DEBUG
-                    print("⚠️ LLM attempt \(attempt) failed: \(error.localizedDescription). Retrying in \(delay)s...")
-                    #endif
+                    Log.ai.warning("LLM attempt \(attempt) failed: \(error, privacy: .public). Retrying in \(delay)s...")
                     try await Task.sleep(for: .seconds(delay))
                 }
             }
@@ -173,7 +170,9 @@ final class NudgyLLMService {
         let startTime = CFAbsoluteTimeGetCurrent()
         
         return try await withRetry(maxAttempts: 2, initialDelay: 1.0) {
-            let url = URL(string: "\(NudgyConfig.OpenAI.baseURL)/chat/completions")!
+            guard let url = URL(string: "\(NudgyConfig.OpenAI.baseURL)/chat/completions") else {
+                throw NudgyLLMError.invalidResponse
+            }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("Bearer \(NudgyConfig.OpenAI.apiKey)", forHTTPHeaderField: "Authorization")
@@ -206,7 +205,7 @@ final class NudgyLLMService {
             guard httpResponse.statusCode == 200 else {
                 let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
                 self.lastError = "HTTP \(httpResponse.statusCode): \(errorBody)"
-                print("🔴 LLM API error: HTTP \(httpResponse.statusCode) — \(errorBody.prefix(200))")
+                Log.ai.error("LLM API error: HTTP \(httpResponse.statusCode) — \(errorBody.prefix(200))")
                 
                 // Don't retry rate limits or auth errors
                 if httpResponse.statusCode == 429 || httpResponse.statusCode == 401 {
@@ -239,7 +238,9 @@ final class NudgyLLMService {
         isGenerating = true
         defer { isGenerating = false }
         
-        let url = URL(string: "\(NudgyConfig.OpenAI.baseURL)/chat/completions")!
+        guard let url = URL(string: "\(NudgyConfig.OpenAI.baseURL)/chat/completions") else {
+            throw NudgyLLMError.invalidResponse
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(NudgyConfig.OpenAI.apiKey)", forHTTPHeaderField: "Authorization")
@@ -373,7 +374,9 @@ final class NudgyLLMService {
         model: String? = nil,
         speed: Double? = nil
     ) async throws -> Data {
-        let url = URL(string: "\(NudgyConfig.OpenAI.baseURL)/audio/speech")!
+        guard let url = URL(string: "\(NudgyConfig.OpenAI.baseURL)/audio/speech") else {
+            throw NudgyLLMError.invalidResponse
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(NudgyConfig.OpenAI.apiKey)", forHTTPHeaderField: "Authorization")

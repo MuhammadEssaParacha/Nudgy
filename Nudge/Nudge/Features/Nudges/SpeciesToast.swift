@@ -3,7 +3,7 @@
 //  Nudge
 //
 //  A brief toast that reveals the fish species earned after completing a task.
-//  Slides in from the top, shows species emoji + name + snowflakes, then auto-dismisses.
+//  Slides in from the top, shows species emoji + name + fish earned, then auto-dismisses.
 //  Rare catches (swordfish, whale) get extra sparkle + haptic.
 //
 //  Phase 8 + 10: Species toast component + rare catch celebration.
@@ -16,8 +16,10 @@ import SwiftUI
 struct SpeciesToast: View {
     
     let species: FishSpecies
-    let snowflakesEarned: Int
+    let fishEarned: Int
     let isRare: Bool
+    /// Optional category info: (icon, label, count today) for the completed task's category
+    var categoryInfo: (icon: String, label: String, count: Int)? = nil
     @Binding var isPresented: Bool
     
     @State private var sparkleRotation: Double = 0
@@ -117,8 +119,9 @@ struct SpeciesToast: View {
                     .foregroundStyle(isRare ? Color(hex: species.glowColorHex) : DesignTokens.textPrimary)
                 
                 HStack(spacing: 4) {
-                    Text(species.emoji)
-                        .font(.system(size: 11))
+                    Image(systemName: species.icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color(hex: species.glowColorHex))
                     Text(species.label)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(DesignTokens.textSecondary)
@@ -126,9 +129,24 @@ struct SpeciesToast: View {
                     Text("•")
                         .foregroundStyle(DesignTokens.textTertiary)
                     
-                    Text("+\(snowflakesEarned) ❄️")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(hex: "87CEEB"))
+                    HStack(spacing: 2) {
+                        Text("+\(fishEarned)")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                        Image(systemName: "fish.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(Color(hex: "87CEEB"))
+                }
+                
+                // Category counter (e.g. "🏠 Household × 3 today")
+                if let info = categoryInfo, info.count >= 2 {
+                    HStack(spacing: 3) {
+                        Image(systemName: info.icon)
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("\(info.label) × \(info.count) today")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(DesignTokens.textTertiary)
+                    }
                 }
             }
             
@@ -155,9 +173,9 @@ struct SpeciesToast: View {
     ZStack {
         Color.black.ignoresSafeArea()
         VStack(spacing: 16) {
-            SpeciesToast(species: .catfish, snowflakesEarned: 1, isRare: false, isPresented: .constant(true))
-            SpeciesToast(species: .swordfish, snowflakesEarned: 10, isRare: true, isPresented: .constant(true))
-            SpeciesToast(species: .whale, snowflakesEarned: 15, isRare: true, isPresented: .constant(true))
+            SpeciesToast(species: .catfish, fishEarned: 1, isRare: false, isPresented: .constant(true))
+            SpeciesToast(species: .swordfish, fishEarned: 10, isRare: true, isPresented: .constant(true))
+            SpeciesToast(species: .whale, fishEarned: 15, isRare: true, isPresented: .constant(true))
         }
     }
     .preferredColorScheme(.dark)

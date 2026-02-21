@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import CloudKit
+import os
 
 @MainActor
 final class CloudKitSyncEngine {
@@ -19,9 +20,7 @@ final class CloudKitSyncEngine {
 
     init?(modelContext: ModelContext, userID: String) {
         guard let db = CloudKitManager.shared.privateDatabase() else {
-            #if DEBUG
-            print("⚠️ CloudKitSyncEngine: CloudKit unavailable, sync disabled")
-            #endif
+            Log.sync.warning("CloudKitSyncEngine: CloudKit unavailable, sync disabled")
             return nil
         }
         self.database = db
@@ -60,9 +59,7 @@ final class CloudKitSyncEngine {
 
             lastSyncDate = Date()
         } catch {
-            #if DEBUG
-            print("⚠️ CloudKit sync failed: \(error)")
-            #endif
+            Log.sync.error("CloudKit sync failed: \(error, privacy: .public)")
         }
     }
 
@@ -95,7 +92,7 @@ final class CloudKitSyncEngine {
             }
         }
 
-        try? modelContext.save()
+        try? modelContext.save() // Best-effort — remote sync is non-critical
     }
 
     private func pushLocalTasks() async throws {
@@ -131,6 +128,11 @@ final class CloudKitSyncEngine {
         record["aiDraft"] = item.aiDraft as CKRecordValue?
         record["aiDraftSubject"] = item.aiDraftSubject as CKRecordValue?
         record["draftGeneratedAt"] = item.draftGeneratedAt as CKRecordValue?
+        
+        // Phase 10: Sync category data across devices
+        record["categoryRaw"] = item.categoryRaw as CKRecordValue?
+        record["categoryColorHex"] = item.categoryColorHex as CKRecordValue?
+        record["categoryIcon"] = item.categoryIcon as CKRecordValue?
 
         return record
     }
@@ -152,7 +154,8 @@ final class CloudKitSyncEngine {
             contactName: record["contactName"] as? String,
             sortOrder: record["sortOrder"] as? Int ?? 0,
             priority: (record["priorityRaw"] as? String).flatMap(TaskPriority.init(rawValue:)),
-            dueDate: record["dueDate"] as? Date
+            dueDate: record["dueDate"] as? Date,
+            category: (record["categoryRaw"] as? String).flatMap(TaskCategory.init(rawValue:))
         )
 
         apply(record: record, to: item)
@@ -177,6 +180,11 @@ final class CloudKitSyncEngine {
         item.aiDraft = record["aiDraft"] as? String
         item.aiDraftSubject = record["aiDraftSubject"] as? String
         item.draftGeneratedAt = record["draftGeneratedAt"] as? Date
+        
+        // Phase 10: Sync category across devices
+        item.categoryRaw = record["categoryRaw"] as? String
+        item.categoryColorHex = record["categoryColorHex"] as? String
+        item.categoryIcon = record["categoryIcon"] as? String
 
         let remoteUpdatedAt = (record["updatedAt"] as? Date) ?? record.modificationDate ?? item.updatedAt
         item.updatedAt = remoteUpdatedAt
@@ -194,8 +202,10 @@ final class CloudKitSyncEngine {
                 return
             }
             NudgyMemory.shared.replaceStore(store)
+        } catch let error as CKError where error.code == .unknownItem {
+            // No remote memory yet — first sync
         } catch {
-            // No remote memory yet.
+            Log.sync.warning("CloudKit pullRemoteMemory failed: \(error, privacy: .public)")
         }
     }
 

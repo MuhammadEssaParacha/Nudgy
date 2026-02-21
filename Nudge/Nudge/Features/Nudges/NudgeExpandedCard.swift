@@ -16,6 +16,7 @@
 
 import SwiftUI
 import SafariServices
+import os
 
 // MARK: - Expanded Card View
 
@@ -46,6 +47,10 @@ struct NudgeExpandedCard: View {
     @State private var browserURL: URL?
     @State private var showDraftFull = false
     @State private var showDeleteConfirm = false
+    @State private var showAlarmPicker = false
+    @State private var alarmDate: Date = Date().addingTimeInterval(3600) // default 1hr from now
+    @State private var alarmSet = false
+    @State private var showCategoryPicker = false
     
     // Nudgy whisper (actionable, category-aware)
     @State private var nudgyWhisper: String = ""
@@ -95,6 +100,12 @@ struct NudgeExpandedCard: View {
                         snoozeChips
                     }
                     
+                    // ─── Alarm picker (opt-in via toolbar) ───
+                    if showAlarmPicker {
+                        divider
+                        alarmPickerSection
+                    }
+                    
                     divider
                     
                     // ─── Toolbar (44pt touch targets, Apple HIG) ───
@@ -103,12 +114,15 @@ struct NudgeExpandedCard: View {
                 .padding(.horizontal, DesignTokens.spacingMD)
                 .padding(.vertical, DesignTokens.spacingSM)
             }
-            .frame(maxHeight: UIScreen.main.bounds.height * 0.50)
+            .frame(maxHeight: UIScreen.current.bounds.height * 0.50)
             .background {
                 RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard)
                     .fill(
                         LinearGradient(
-                            colors: [accentColor.opacity(0.06), Color.clear],
+                            colors: item.resolvedCategory == .general
+                                ? [accentColor.opacity(0.06), Color.clear]
+                                : [item.resolvedCategory.gradientColors[0].opacity(0.08),
+                                   item.resolvedCategory.gradientColors.last?.opacity(0.02) ?? .clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -166,6 +180,7 @@ struct NudgeExpandedCard: View {
             .foregroundStyle(DesignTokens.textPrimary)
             .lineLimit(1...5)
             .textFieldStyle(.plain)
+            .submitLabel(.done)
             .padding(DesignTokens.spacingSM)
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -200,6 +215,49 @@ struct NudgeExpandedCard: View {
     
     private var compactMeta: some View {
         HStack(spacing: DesignTokens.spacingSM) {
+            // Tappable category chip — opens picker
+            if item.actionType == nil {
+                Button {
+                    HapticService.shared.actionButtonTap()
+                    showCategoryPicker = true
+                } label: {
+                    HStack(spacing: 3) {
+                        CategoryChip(category: item.resolvedCategory, small: true)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 6, weight: .bold))
+                            .foregroundStyle(DesignTokens.textTertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showCategoryPicker) {
+                    NavigationStack {
+                        TaskCategoryPicker(selectedCategory: Binding(
+                            get: { item.category },
+                            set: { newCat in
+                                if let cat = newCat {
+                                    item.category = cat
+                                } else {
+                                    item.categoryRaw = nil
+                                }
+                                item.updatedAt = Date()
+                                onContentChanged?()
+                            }
+                        ))
+                        .navigationTitle(String(localized: "Category"))
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button(String(localized: "Done")) {
+                                    showCategoryPicker = false
+                                }
+                            }
+                        }
+                    }
+                    .presentationDetents([.medium])
+                    .preferredColorScheme(.dark)
+                }
+            }
+            
             // Priority
             if let priority = item.priority {
                 metadataChip(
@@ -264,10 +322,57 @@ struct NudgeExpandedCard: View {
             navigateCard
         case .addToCalendar:
             calendarCard
+        case .setAlarm:
+            alarmCard
         case .search:
             searchCard
         case nil:
-            // No action type — show smart URL suggestions if any
+            // Category-aware action area — tools based on resolved category
+            categoryActionArea
+        }
+    }
+    
+    // MARK: ── Category Action Area (replaces generic) ──
+    
+    @ViewBuilder
+    private var categoryActionArea: some View {
+        let cat = item.resolvedCategory
+        
+        // Always show category card for recognized categories
+        if cat != .general {
+            CategoryCardView(
+                item: item,
+                category: cat,
+                onFocus: onFocus,
+                onAction: onAction,
+                onTimerStart: { minutes in
+                    // Set estimated minutes so FocusTimerView picks up the duration
+                    item.estimatedMinutes = minutes
+                    onFocus?()
+                },
+                onOpenMaps: {
+                    // Open Maps with task content as search query
+                    let query = item.actionTarget ?? item.content
+                    if let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                       let url = URL(string: "maps://?q=\(encoded)") {
+                        UIApplication.shared.open(url)
+                    }
+                },
+                onAddCalendar: {
+                    // Create real calendar event via EventKit
+                    HapticService.shared.actionButtonTap()
+                    Task {
+                        if let _ = await CalendarService.shared.createEvent(from: item) {
+                            HapticService.shared.swipeDone()
+                        } else {
+                            HapticService.shared.error()
+                            Log.ui.error("Failed to create calendar event")
+                        }
+                    }
+                }
+            )
+        } else {
+            // General category — fall back to smart URL suggestions or nothing
             genericActionArea
         }
     }
@@ -927,8 +1032,9 @@ struct NudgeExpandedCard: View {
             // Nudgy snooze intelligence
             if item.isStale {
                 HStack(spacing: 6) {
-                    Text("🐧")
-                        .font(.system(size: 10))
+                    Image(systemName: "pawprint.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentStale.opacity(0.7))
                     Text(item.ageInDays >= 7
                         ? String(localized: "snoozed a few times… want to break it down instead?")
                         : String(localized: "been here a bit. …sometimes dropping it is okay too"))
@@ -973,6 +1079,244 @@ struct NudgeExpandedCard: View {
         .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
     
+    // MARK: - Alarm Picker Section
+    
+    private var alarmPickerSection: some View {
+        let tint = Color(hex: "FF9F0A")
+        
+        return VStack(spacing: DesignTokens.spacingSM) {
+            HStack {
+                Text(String(localized: "Set Alarm"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textTertiary)
+                    .textCase(.uppercase)
+                Spacer()
+                if alarmSet {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                        Text(String(localized: "Alarm set"))
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(DesignTokens.accentComplete)
+                }
+                Button {
+                    withAnimation(AnimationConstants.springSmooth) {
+                        showAlarmPicker = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DesignTokens.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Quick alarm presets
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DesignTokens.spacingSM) {
+                    ForEach(alarmPresets, id: \.0) { label, icon, date in
+                        Button {
+                            HapticService.shared.actionButtonTap()
+                            alarmDate = date
+                            scheduleAlarmForItem(at: date)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: icon)
+                                    .font(.system(size: 11))
+                                Text(String(localized: String.LocalizationValue(label)))
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(tint)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(tint.opacity(0.06))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(tint.opacity(0.15), lineWidth: 0.5)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            
+            // Custom time picker
+            HStack(spacing: DesignTokens.spacingSM) {
+                DatePicker(
+                    String(localized: "Alarm time"),
+                    selection: $alarmDate,
+                    in: Date()...,
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .tint(tint)
+                .colorScheme(.dark)
+                
+                Button {
+                    HapticService.shared.actionButtonTap()
+                    scheduleAlarmForItem(at: alarmDate)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "alarm.fill")
+                            .font(.system(size: 12))
+                        Text(String(localized: "Set"))
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule().fill(tint)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+    
+    private var alarmPresets: [(String, String, Date)] {
+        let cal = Calendar.current
+        let now = Date()
+        return [
+            ("5 min", "clock.fill", cal.date(byAdding: .minute, value: 5, to: now)!),
+            ("15 min", "clock.fill", cal.date(byAdding: .minute, value: 15, to: now)!),
+            ("30 min", "clock.fill", cal.date(byAdding: .minute, value: 30, to: now)!),
+            ("1 hour", "clock.fill", cal.date(byAdding: .hour, value: 1, to: now)!),
+            ("Tomorrow 9am", "sunrise.fill", cal.date(byAdding: .day, value: 1, to: cal.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now)!),
+        ]
+    }
+    
+    private func scheduleAlarmForItem(at date: Date) {
+        Task {
+            let permitted = await NotificationService.shared.requestPermission()
+            if permitted {
+                NotificationService.shared.scheduleAlarm(for: item, at: date)
+                withAnimation(AnimationConstants.springSmooth) {
+                    alarmSet = true
+                }
+                HapticService.shared.swipeDone()
+            } else {
+                HapticService.shared.error()
+                Log.ui.warning("Alarm not scheduled — notification permission denied")
+            }
+        }
+    }
+    
+    // MARK: ── ALARM Card ──
+    /// Alarm action card — shown when item has .setAlarm action type.
+    
+    private var alarmCard: some View {
+        let tint = Color(hex: "FF9F0A")
+        
+        return VStack(spacing: DesignTokens.spacingSM) {
+            // Header row
+            HStack(spacing: DesignTokens.spacingMD) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(tint.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                    .overlay {
+                        Image(systemName: "alarm.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(tint)
+                    }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Set Alarm"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                    if alarmSet {
+                        Text(alarmDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(DesignTokens.accentComplete)
+                    } else if let due = item.dueDate {
+                        Text(String(localized: "Due \(due.formatted(.dateTime.month(.abbreviated).day().hour().minute()))"))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(DesignTokens.textTertiary)
+                    } else {
+                        Text(String(localized: "Pick a time to be reminded"))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(DesignTokens.textTertiary)
+                    }
+                }
+                
+                Spacer()
+            }
+            
+            // Quick presets
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DesignTokens.spacingSM) {
+                    ForEach(alarmPresets, id: \.0) { label, icon, date in
+                        Button {
+                            HapticService.shared.actionButtonTap()
+                            alarmDate = date
+                            scheduleAlarmForItem(at: date)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: icon)
+                                    .font(.system(size: 11))
+                                Text(String(localized: String.LocalizationValue(label)))
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .foregroundStyle(tint)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(tint.opacity(0.06))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(tint.opacity(0.15), lineWidth: 0.5)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            
+            // Custom date + set button
+            HStack(spacing: DesignTokens.spacingSM) {
+                DatePicker(
+                    String(localized: "Alarm time"),
+                    selection: $alarmDate,
+                    in: Date()...,
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .tint(tint)
+                .colorScheme(.dark)
+                
+                Button {
+                    HapticService.shared.actionButtonTap()
+                    scheduleAlarmForItem(at: alarmDate)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: alarmSet ? "checkmark.circle.fill" : "alarm.fill")
+                            .font(.system(size: 12))
+                        Text(alarmSet ? String(localized: "Alarm Set") : String(localized: "Set Alarm"))
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule().fill(alarmSet ? DesignTokens.accentComplete : tint)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(DesignTokens.spacingSM)
+        .background(actionCardBackground(tint))
+    }
+    
     // MARK: - Toolbar (44pt touch targets — Apple HIG compliant)
     
     private var toolbar: some View {
@@ -1013,6 +1357,18 @@ struct NudgeExpandedCard: View {
             ) {
                 withAnimation(AnimationConstants.springSmooth) {
                     showSnoozeOptions.toggle()
+                }
+            }
+            
+            // Set Alarm
+            toolbarBtn(
+                icon: "alarm.fill",
+                label: String(localized: "Alarm"),
+                color: showAlarmPicker ? Color(hex: "FF9F0A") : DesignTokens.textSecondary,
+                isActive: showAlarmPicker
+            ) {
+                withAnimation(AnimationConstants.springSmooth) {
+                    showAlarmPicker.toggle()
                 }
             }
             
@@ -1088,7 +1444,7 @@ struct NudgeExpandedCard: View {
         guard microSteps.isEmpty else { return }
         isLoadingSteps = true
         Task {
-            let steps = await MicroStepGenerator.generate(for: item.content, emoji: item.emoji)
+            let steps = await MicroStepGenerator.generate(for: item.content, emoji: item.emoji, category: item.category)
             withAnimation(AnimationConstants.springSmooth) {
                 microSteps = steps
                 isLoadingSteps = false
@@ -1113,8 +1469,9 @@ struct NudgeExpandedCard: View {
         Group {
             if !nudgyWhisper.isEmpty {
                 HStack(alignment: .top, spacing: DesignTokens.spacingSM) {
-                    Text("🐧")
-                        .font(.system(size: 12))
+                    Image(systemName: "pawprint.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
                     
                     Text(nudgyWhisper)
                         .font(.system(size: 12, weight: .regular, design: .rounded))
@@ -1224,9 +1581,18 @@ struct NudgeExpandedCard: View {
         case .search:
             nudgyWhisper = String(localized: "search task — tap to look it up")
             
+        case .setAlarm:
+            nudgyWhisper = String(localized: "set an alarm so you don't forget")
+            
         case nil:
-            // No specific action type — use context-aware whispers
-            generateGeneralWhisper()
+            // Use category template whisper bank
+            let cat = item.resolvedCategory
+            if cat != .general {
+                nudgyWhisper = item.categoryTemplate.randomWhisper()
+            } else {
+                // No specific action type or category — use context-aware whispers
+                generateGeneralWhisper()
+            }
             return
         }
         
@@ -1309,7 +1675,7 @@ struct NudgeExpandedCard: View {
         celebrationText = NudgyPersonality.CuratedLines.completionCelebrations.randomElement()
             ?? "done. …that took something 💙"
         
-        HapticService.shared.swipeDone()
+        HapticService.shared.completionHaptic(for: item.resolvedCategory)
         
         withAnimation(AnimationConstants.springSmooth) {
             showDoneCelebration = true

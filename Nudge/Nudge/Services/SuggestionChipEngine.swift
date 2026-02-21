@@ -133,7 +133,7 @@ enum SuggestionChipEngine {
         if doneToday == 0 && totalActive > 0 {
             if let firstTask = activeQueue.first {
                 chips.append(SuggestionChip(
-                    label: String(localized: "Start with \(firstTask.emoji) \(String(firstTask.content.prefix(20)))"),
+                    label: String(localized: "Start with \(firstTask.emoji ?? "") \(String(firstTask.content.prefix(20)))"),
                     icon: "play.fill",
                     action: .sendMessage("Help me get started on: \(firstTask.content)")
                 ))
@@ -159,11 +159,11 @@ enum SuggestionChipEngine {
             ))
         }
         
-        // Brain dump suggestion
+        // Unload suggestion
         if totalActive < 3 {
             chips.append(SuggestionChip(
-                label: String(localized: "Brain dump"),
-                icon: "brain.head.profile.fill",
+                label: String(localized: "Unload"),
+                icon: "tray.and.arrow.down.fill",
                 action: .openBrainDump
             ))
         }
@@ -265,6 +265,12 @@ enum SuggestionChipEngine {
                 label: String(localized: "Try a different search"),
                 icon: "magnifyingglass",
                 action: .sendMessage("That search didn't work. Can you suggest a better one?")
+            ))
+        case .setAlarm, .addToCalendar:
+            chips.append(SuggestionChip(
+                label: String(localized: "Alarm set!"),
+                icon: "checkmark.circle.fill",
+                action: .sendMessage("I set the alarm!")
             ))
         default:
             chips.append(SuggestionChip(

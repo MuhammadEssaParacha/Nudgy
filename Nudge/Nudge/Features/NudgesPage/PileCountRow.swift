@@ -17,6 +17,7 @@ struct PileCountRow: View {
     let streak: Int
     let onDone: (NudgeItem) -> Void
     let onSnooze: (NudgeItem) -> Void
+    var onDetail: ((NudgeItem) -> Void)?
     
     @State private var isExpanded = false
     
@@ -63,7 +64,7 @@ struct PileCountRow: View {
                 // Expanded inline list
                 if isExpanded {
                     VStack(spacing: DesignTokens.spacingXS) {
-                        ForEach(items, id: \.id) { item in
+                        ForEach(sortedPileItems, id: \.id) { item in
                             pileItemRow(item)
                         }
                     }
@@ -77,10 +78,38 @@ struct PileCountRow: View {
     // MARK: - Pile Label
     
     private var pileLabel: String {
+        let overdueCount = items.filter { item in
+            guard let due = item.dueDate else { return false }
+            return due < Date()
+        }.count
+        
+        let base: String
         if items.count == 1 {
-            return String(localized: "1 more in your pile")
+            base = String(localized: "1 more in your pile")
+        } else {
+            base = String(localized: "\(items.count) more in your pile")
         }
-        return String(localized: "\(items.count) more in your pile")
+        
+        if overdueCount > 0 {
+            return base + String(localized: " · \(overdueCount) overdue")
+        }
+        return base
+    }
+    
+    /// Items sorted by urgency: overdue → stale → due soon → rest.
+    private var sortedPileItems: [NudgeItem] {
+        items.sorted { a, b in
+            pileUrgency(a) > pileUrgency(b)
+        }
+    }
+    
+    private func pileUrgency(_ item: NudgeItem) -> Int {
+        var score = 0
+        if let due = item.dueDate, due < Date() { score += 100 }
+        if item.isStale { score += 50 }
+        if let due = item.dueDate, Calendar.current.isDateInToday(due) { score += 30 }
+        if item.scheduledTime != nil { score += 20 }
+        return score
     }
     
     // MARK: - Pile Item Row
@@ -98,10 +127,25 @@ struct PileCountRow: View {
                         accentColor: accentColor
                     )
                     
-                    Text(item.content)
-                        .font(AppTheme.footnote.weight(.medium))
-                        .foregroundStyle(DesignTokens.textPrimary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.content)
+                            .font(AppTheme.footnote.weight(.medium))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                            .lineLimit(1)
+                        
+                        if item.actionType == nil {
+                            let cat = item.resolvedCategory
+                            if cat != .general {
+                                HStack(spacing: 3) {
+                                    Image(systemName: cat.icon)
+                                        .font(.system(size: 9, weight: .semibold))
+                                    Text(cat.label)
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .foregroundStyle(DesignTokens.textTertiary)
+                            }
+                        }
+                    }
                     
                     Spacer(minLength: 0)
                     
@@ -115,11 +159,31 @@ struct PileCountRow: View {
                         .fill(Color.white.opacity(0.02))
                 }
                 .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusChip))
+                .contextMenu {
+                    Button {
+                        onDetail?(item)
+                    } label: {
+                        Label(String(localized: "Open Detail"), systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    
+                    Button {
+                        onDone(item)
+                    } label: {
+                        Label(String(localized: "Mark Done"), systemImage: "checkmark.circle.fill")
+                    }
+                    
+                    Button {
+                        onSnooze(item)
+                    } label: {
+                        Label(String(localized: "Snooze"), systemImage: "moon.zzz.fill")
+                    }
+                }
             },
             onSwipeLeading: { onDone(item) },
             leadingLabel: String(localized: "Done"),
             leadingIcon: "checkmark",
             leadingColor: DesignTokens.accentComplete,
+            categoryColor: item.resolvedCategory != .general ? item.resolvedCategory.primaryColor : nil,
             onSwipeTrailing: { onSnooze(item) },
             trailingLabel: String(localized: "Snooze"),
             trailingIcon: "moon.zzz.fill",

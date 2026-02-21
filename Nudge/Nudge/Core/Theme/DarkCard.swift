@@ -104,8 +104,9 @@ extension DarkCard where Content == EmptyView {
         VStack(spacing: 16) {
             DarkCard(accentColor: DesignTokens.accentActive) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("📞")
-                        .font(AppTheme.emoji)
+                    Image(systemName: "phone.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentActive)
                     Text("Call the dentist")
                         .cardTitleStyle()
                     Text("Added 2 hours ago")
@@ -115,8 +116,9 @@ extension DarkCard where Content == EmptyView {
             
             DarkCard(accentColor: DesignTokens.accentStale, showPulse: true) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("📦")
-                        .font(AppTheme.emoji)
+                    Image(systemName: "shippingbox.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentStale)
                     Text("Buy dog food")
                         .cardTitleStyle()
                     Text("3 days old")
@@ -126,8 +128,9 @@ extension DarkCard where Content == EmptyView {
             
             DarkCard(accentColor: DesignTokens.accentComplete) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("✅")
-                        .font(AppTheme.emoji)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentComplete)
                     Text("Reply to Sarah")
                         .cardTitleStyle()
                         .strikethrough()

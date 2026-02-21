@@ -31,8 +31,23 @@ struct CardView: View {
     
     // MARK: - Computed
     
+    private var category: TaskCategory { item.resolvedCategory }
+    
     private var accentColor: Color {
         AccentColorSystem.shared.color(for: item.accentStatus)
+    }
+    
+    /// Category-tinted border color — uses category primary when idle, swipe-direction color during drag.
+    private var borderColor: Color {
+        if showGreenFlash { return categoryCompletionColor }
+        if swipeDirection != .none { return swipeHintColor }
+        // Idle: blend category color with status accent
+        return category == .general ? accentColor : category.primaryColor
+    }
+    
+    /// Category-specific completion flash color instead of generic green.
+    private var categoryCompletionColor: Color {
+        category == .general ? DesignTokens.accentComplete : category.primaryColor
     }
     
     private var swipeDirection: SwipeDirection {
@@ -44,7 +59,7 @@ struct CardView: View {
     
     private var swipeHintColor: Color {
         switch swipeDirection {
-        case .done:   return DesignTokens.accentComplete
+        case .done:   return categoryCompletionColor
         case .snooze: return DesignTokens.accentStale
         case .skip:   return DesignTokens.textTertiary
         case .none:   return accentColor
@@ -90,13 +105,31 @@ struct CardView: View {
     
     private var cardContent: some View {
         DarkCard(
-            accentColor: showGreenFlash ? DesignTokens.accentComplete : swipeHintColor,
+            accentColor: borderColor,
             showPulse: item.isStale
         ) {
             VStack(alignment: .leading, spacing: DesignTokens.spacingMD) {
-                // Icon + Source icon
+                // Icon + Category chip + Source icon
                 HStack {
                     TaskIconView(emoji: item.emoji, actionType: item.actionType, size: .medium)
+                    
+                    // Category chip (non-general only)
+                    if category != .general {
+                        HStack(spacing: 3) {
+                            Image(systemName: category.icon)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(category.primaryColor)
+                            Text(category.label)
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(category.primaryColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(category.primaryColor.opacity(0.12))
+                        )
+                    }
                     
                     Spacer()
                     
@@ -263,7 +296,8 @@ struct CardView: View {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         draftCopied = true
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(2))
                         withAnimation(.easeOut(duration: 0.25)) {
                             draftCopied = false
                         }
@@ -308,7 +342,7 @@ struct CardView: View {
             Spacer()
             
             Label(String(localized: "Done"), systemImage: "arrow.right")
-                .foregroundStyle(swipeDirection == .done ? DesignTokens.accentComplete : DesignTokens.textTertiary)
+                .foregroundStyle(swipeDirection == .done ? categoryCompletionColor : DesignTokens.textTertiary)
         }
         .font(AppTheme.footnote)
         .padding(.top, DesignTokens.spacingXS)
@@ -372,7 +406,8 @@ struct CardView: View {
             rotation = AnimationConstants.swipeDoneRotation
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.4))
             onDone()
             resetCard()
         }
@@ -390,7 +425,8 @@ struct CardView: View {
             dragOffset = CGSize(width: -400, height: 0)
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.3))
             onSnooze()
             resetCard()
         }
@@ -407,25 +443,32 @@ struct CardView: View {
             dragOffset = CGSize(width: 0, height: 500)
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.3))
             onSkip()
             resetCard()
         }
     }
     
     private func resetCard() {
-        dragOffset = .zero
-        rotation = 0
+        withAnimation(AnimationConstants.cardSnapBack) {
+            dragOffset = .zero
+            rotation = 0
+        }
         showGreenFlash = false
     }
     
     // MARK: - Accessibility
     
     private var cardAccessibilityLabel: String {
-        var label = item.content
+        let cat = item.resolvedCategory
+        var label = cat != .general
+            ? "\(cat.label) \(String(localized: "task")): \(item.content)"
+            : item.content
         if item.isStale { label += ", \(String(localized: "stale for")) \(item.ageInDays) \(String(localized: "days"))" }
         if let contact = item.contactName { label += ", \(contact)" }
         if let action = item.actionType { label += ", \(action.label)" }
+        label += ", \(queuePosition) \(String(localized: "of")) \(queueTotal)"
         return label
     }
 }

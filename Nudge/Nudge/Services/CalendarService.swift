@@ -11,6 +11,7 @@
 
 import EventKit
 import SwiftUI
+import os
 
 @MainActor @Observable
 final class CalendarService {
@@ -30,7 +31,7 @@ final class CalendarService {
     
     func checkAuthorization() {
         let status = EKEventStore.authorizationStatus(for: .event)
-        isAuthorized = (status == .fullAccess || status == .authorized)
+        isAuthorized = (status == .fullAccess)
     }
     
     func requestAccess() async -> Bool {
@@ -42,7 +43,7 @@ final class CalendarService {
             }
             return granted
         } catch {
-            print("❌ Calendar access error: \(error)")
+            Log.services.error("Calendar access error: \(error, privacy: .public)")
             isAuthorized = false
             return false
         }
@@ -138,14 +139,10 @@ final class CalendarService {
         
         do {
             try eventStore.save(event, span: .thisEvent)
-            #if DEBUG
-            print("📅 Created calendar event: \(item.content)")
-            #endif
+            Log.services.debug("Created calendar event: \(item.content)")
             return event.eventIdentifier
         } catch {
-            #if DEBUG
-            print("❌ Failed to create calendar event: \(error)")
-            #endif
+            Log.services.error("Failed to create calendar event: \(error, privacy: .public)")
             return nil
         }
     }

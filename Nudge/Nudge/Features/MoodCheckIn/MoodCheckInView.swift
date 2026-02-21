@@ -12,6 +12,7 @@
 
 import SwiftUI
 import SwiftData
+import os
 
 struct MoodCheckInView: View {
     
@@ -25,6 +26,7 @@ struct MoodCheckInView: View {
     @State private var note: String = ""
     @State private var phase: CheckInPhase = .mood
     @State private var isSaving = false
+    @State private var autoDismissTask: Task<Void, Never>?
     
     private enum CheckInPhase {
         case mood, energy, note, done
@@ -93,8 +95,9 @@ struct MoodCheckInView: View {
                         }
                     } label: {
                         VStack(spacing: DesignTokens.spacingSM) {
-                            Text(mood.emoji)
-                                .font(.system(size: 40))
+                            Image(systemName: mood.icon)
+                                .font(.system(size: 32, weight: .semibold))
+                                .foregroundStyle(selectedMood == mood ? mood.color : .white.opacity(0.6))
                                 .scaleEffect(selectedMood == mood ? 1.2 : 1.0)
                             
                             Text(mood.label)
@@ -177,8 +180,9 @@ struct MoodCheckInView: View {
     private var noteView: some View {
         VStack(spacing: DesignTokens.spacingXL) {
             if let mood = selectedMood {
-                Text(mood.emoji)
-                    .font(.system(size: 48))
+                Image(systemName: mood.icon)
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(mood.color)
             }
             
             Text(String(localized: "Anything on your mind?"))
@@ -189,6 +193,7 @@ struct MoodCheckInView: View {
                 .font(AppTheme.body)
                 .foregroundStyle(DesignTokens.textPrimary)
                 .lineLimit(3...6)
+                .submitLabel(.done)
                 .padding(DesignTokens.spacingMD)
                 .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusCard))
             
@@ -235,9 +240,14 @@ struct MoodCheckInView: View {
         }
         .transition(.scale(scale: 0.8).combined(with: .opacity))
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            autoDismissTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
                 dismiss()
             }
+        }
+        .onDisappear {
+            autoDismissTask?.cancel()
         }
     }
     
@@ -259,7 +269,13 @@ struct MoodCheckInView: View {
         )
         
         modelContext.insert(entry)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            Log.ui.error("[MoodCheckIn] Save failed: \(error, privacy: .public)")
+            isSaving = false
+            return
+        }
         
         HapticService.shared.swipeDone()
         

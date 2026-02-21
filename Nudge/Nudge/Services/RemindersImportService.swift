@@ -12,6 +12,7 @@
 import EventKit
 import SwiftData
 import SwiftUI
+import os
 
 @MainActor @Observable
 final class RemindersImportService {
@@ -33,7 +34,7 @@ final class RemindersImportService {
     
     func checkAuthorization() {
         let status = EKEventStore.authorizationStatus(for: .reminder)
-        isAuthorized = (status == .fullAccess || status == .authorized)
+        isAuthorized = (status == .fullAccess)
     }
     
     func requestAccess() async -> Bool {
@@ -45,9 +46,7 @@ final class RemindersImportService {
             }
             return granted
         } catch {
-            #if DEBUG
-            print("❌ Reminders access error: \(error)")
-            #endif
+            Log.services.error("Reminders access error: \(error, privacy: .public)")
             isAuthorized = false
             return false
         }
@@ -162,15 +161,11 @@ final class RemindersImportService {
                 try context.save()
                 lastImportCount = importedCount
                 
-                #if DEBUG
-                print("📋 Imported \(importedCount) reminders from '\(calendar.title)'")
-                #endif
+                Log.services.info("Imported \(importedCount) reminders from '\(calendar.title)'")
                 
                 NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
             } catch {
-                #if DEBUG
-                print("❌ Failed to save imported reminders: \(error)")
-                #endif
+                Log.services.error("Failed to save imported reminders: \(error, privacy: .public)")
                 return 0
             }
         }

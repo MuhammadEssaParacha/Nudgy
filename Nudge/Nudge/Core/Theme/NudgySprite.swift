@@ -45,7 +45,7 @@ struct NudgyAccessoryItem: Identifiable, Equatable {
 enum AccessoryCatalog {
     
     static let all: [NudgyAccessoryItem] = [
-        // Tier 1 — Quick unlocks (5 ❄️ each)
+        // Tier 1 — Quick unlocks (5 🐟 each)
         NudgyAccessoryItem(id: "scarf-blue", imageName: "acc-scarf-blue", slot: .neck,
                           offsetX: 0, offsetY: 0.15, scale: 0.5),
         NudgyAccessoryItem(id: "scarf-red", imageName: "acc-scarf-red", slot: .neck,
@@ -57,7 +57,7 @@ enum AccessoryCatalog {
         NudgyAccessoryItem(id: "flower", imageName: "acc-flower", slot: .head,
                           offsetX: 0.15, offsetY: -0.32, scale: 0.2),
         
-        // Tier 2 — Medium effort (15 ❄️ each)
+        // Tier 2 — Medium effort (15 🐟 each)
         NudgyAccessoryItem(id: "beanie-red", imageName: "acc-beanie-red", slot: .head,
                           offsetX: 0, offsetY: -0.33, scale: 0.45),
         NudgyAccessoryItem(id: "headphones", imageName: "acc-headphones", slot: .head,
@@ -67,7 +67,7 @@ enum AccessoryCatalog {
         NudgyAccessoryItem(id: "bandana", imageName: "acc-bandana", slot: .neck,
                           offsetX: 0, offsetY: 0.1, scale: 0.45),
         
-        // Tier 3 — Real commitment (30 ❄️ each)
+        // Tier 3 — Real commitment (30 🐟 each)
         NudgyAccessoryItem(id: "book", imageName: "acc-book", slot: .held,
                           offsetX: 0.2, offsetY: 0.1, scale: 0.3),
         NudgyAccessoryItem(id: "guitar", imageName: "acc-guitar", slot: .held,
@@ -75,7 +75,7 @@ enum AccessoryCatalog {
         NudgyAccessoryItem(id: "armchair", imageName: "acc-armchair", slot: .furniture,
                           offsetX: 0, offsetY: 0.15, scale: 0.8),
         
-        // Tier 4 — Legendary (50 ❄️ each)
+        // Tier 4 — Legendary (50 🐟 each)
         NudgyAccessoryItem(id: "crown", imageName: "acc-crown", slot: .head,
                           offsetX: 0, offsetY: -0.35, scale: 0.35),
         NudgyAccessoryItem(id: "cape", imageName: "acc-cape", slot: .body,
@@ -86,7 +86,7 @@ enum AccessoryCatalog {
         all.first { $0.id == id }
     }
     
-    /// Cost in snowflakes to unlock each accessory.
+    /// Cost in fish to unlock each accessory.
     static func cost(for id: String) -> Int {
         switch id {
         // Tier 1
@@ -117,7 +117,28 @@ enum AccessoryCatalog {
         }
     }
     
-    /// Emoji representation for placeholder UI.
+    /// SF Symbol icon for placeholder UI.
+    static func icon(for id: String) -> String {
+        switch id {
+        case "scarf-blue":  return "wind"
+        case "scarf-red":   return "wind"
+        case "bow-tie":     return "gift.fill"
+        case "sunglasses":  return "eyeglasses"
+        case "flower":      return "camera.macro"
+        case "beanie-red":  return "hood.fill"
+        case "headphones":  return "headphones"
+        case "backpack":    return "backpack.fill"
+        case "bandana":     return "flag.fill"
+        case "book":        return "book.fill"
+        case "guitar":      return "guitars.fill"
+        case "armchair":    return "chair.lounge.fill"
+        case "crown":       return "crown.fill"
+        case "cape":        return "bolt.shield.fill"
+        default:            return "gift.fill"
+        }
+    }
+    
+    /// Deprecated — use `icon(for:)` for rendering.
     static func emoji(for id: String) -> String {
         switch id {
         case "scarf-blue":  return "🧣"
@@ -191,15 +212,16 @@ struct AccessoryOverlay: View {
         ]
         return equippedIDs
             .compactMap { AccessoryCatalog.item(for: $0) }
-            .sorted { slotOrder.firstIndex(of: $0.slot)! < slotOrder.firstIndex(of: $1.slot)! }
+            .sorted { (slotOrder.firstIndex(of: $0.slot) ?? 999) < (slotOrder.firstIndex(of: $1.slot) ?? 999) }
     }
     
     @ViewBuilder
     private func accessoryView(for item: NudgyAccessoryItem) -> some View {
         if usePlaceholder || UIImage(named: item.imageName) == nil {
-            // Placeholder: emoji in a small circle
-            Text(AccessoryCatalog.emoji(for: item.id))
-                .font(.system(size: item.scale * penguinSize * 0.4))
+            // Placeholder: SF Symbol fallback
+            Image(systemName: AccessoryCatalog.icon(for: item.id))
+                .font(.system(size: item.scale * penguinSize * 0.35, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
         } else {
             Image(item.imageName)
                 .resizable()

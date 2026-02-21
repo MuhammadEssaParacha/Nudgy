@@ -2,7 +2,7 @@
 //  UpNextSection.swift
 //  Nudge
 //
-//  Shows 2-3 "up next" peek cards below the hero card.
+//  Shows 2 "up next" peek cards below the hero card.
 //  These preview upcoming tasks with their fish bounties,
 //  creating a "what's next" pull that motivates completing the current card.
 //
@@ -16,10 +16,13 @@ struct UpNextSection: View {
     let items: [NudgeItem]
     let streak: Int
     let onPromote: (NudgeItem) -> Void
+    var onDetail: ((NudgeItem) -> Void)?
+    var onDone: ((NudgeItem) -> Void)?
+    var onSnooze: ((NudgeItem) -> Void)?
     
-    /// Show at most 3 peek cards
+    /// Show at most 2 peek cards to reduce choice paralysis
     private var visibleItems: [NudgeItem] {
-        Array(items.prefix(3))
+        Array(items.prefix(2))
     }
     
     var body: some View {
@@ -34,25 +37,30 @@ struct UpNextSection: View {
                     
                     Spacer()
                     
-                    if items.count > 3 {
-                        Text(String(localized: "+\(items.count - 3) more"))
+                    if items.count > 2 {
+                        Text(String(localized: "+\(items.count - 2) more"))
                             .font(AppTheme.caption)
                             .foregroundStyle(DesignTokens.textTertiary)
                     }
                 }
                 .padding(.horizontal, DesignTokens.spacingXS)
                 
-                // Peek cards
+                // Peek cards (swipeable)
                 ForEach(visibleItems, id: \.id) { item in
                     PeekCardRow(
                         item: item,
                         streak: streak,
-                        onTap: { onPromote(item) }
+                        onTap: { onPromote(item) },
+                        onDetail: { onDetail?(item) },
+                        onDone: { onDone?(item) },
+                        onSnooze: { onSnooze?(item) }
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
                 }
             }
             .transition(.opacity)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(String(localized: "Up next: \(visibleItems.count) tasks"))
         }
     }
 }

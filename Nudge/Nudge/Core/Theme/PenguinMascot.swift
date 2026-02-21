@@ -59,7 +59,6 @@ struct PenguinMascot: View {
     @State private var swayOffset: CGFloat = 0
     @State private var bounceOffset: CGFloat = 0
     @State private var dotPhase = 0
-    @State private var scarfSway: CGFloat = 0
     @State private var breatheScale: CGFloat = 1.0
     @State private var zzzOpacity: [Double] = [0.6, 0.4, 0.2]
     @State private var zzzOffset: [CGFloat] = [0, 0, 0]
@@ -120,10 +119,18 @@ struct PenguinMascot: View {
                 .offset(y: p * 0.005)
             
             penguinWings
-            penguinScarf
             penguinHead
             penguinFacePatch
-            if showBeanie { penguinBeanie }
+            if showBeanie {
+                penguinBeanie
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.05, anchor: .bottom)
+                                .combined(with: .opacity),
+                            removal: .opacity
+                        )
+                    )
+            }
             penguinCheekBlush
             penguinEyes
             penguinEyebrows
@@ -224,6 +231,7 @@ struct PenguinMascot: View {
                 )
             }
             .stroke(Color.white.opacity(0.04), lineWidth: p * 0.004)
+
         }
         .frame(width: p * 0.79, height: p * 0.94)
         .offset(y: p * 0.07)
@@ -238,7 +246,12 @@ struct PenguinMascot: View {
             Ellipse()
                 .fill(
                     LinearGradient(
-                        colors: [PenguinColors.bellyTop, PenguinColors.bellyTop, PenguinColors.bellyBottom],
+                        stops: [
+                            .init(color: Color(hex: "FFE066"), location: 0.0),
+                            .init(color: Color(hex: "FFF0B0"), location: 0.30),
+                            .init(color: Color(hex: "F5F5F7"), location: 0.65),
+                            .init(color: Color(hex: "F5F5F7"), location: 1.0),
+                        ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -273,6 +286,26 @@ struct PenguinMascot: View {
                         endRadius: p * 0.13
                     )
                 )
+
+            // Belly button — ∩ shape (upside-down U navel)
+            Path { path in
+                let bw = p * 0.58
+                let bh = p * 0.76
+                let cx = bw * 0.50
+                let cy = bh * 0.70
+                let r  = p * 0.028
+                // Start bottom-left, arc UPWARD to bottom-right → ∩
+                path.move(to: CGPoint(x: cx - r, y: cy))
+                path.addCurve(
+                    to:       CGPoint(x: cx + r, y: cy),
+                    control1: CGPoint(x: cx - r * 0.6, y: cy - r * 1.3),
+                    control2: CGPoint(x: cx + r * 0.6, y: cy - r * 1.3)
+                )
+            }
+            .stroke(
+                Color.black.opacity(0.20),
+                style: StrokeStyle(lineWidth: p * 0.007, lineCap: .round)
+            )
         }
         .frame(width: p * 0.58, height: p * 0.76)
         .offset(y: p * 0.13)
@@ -663,26 +696,6 @@ struct PenguinMascot: View {
         .offset(y: p * 0.01)
     }
     
-    // MARK: - Scarf (wraps slimmed neck junction)
-    //  Slimmed: scarf_w = 0.58p, scarf_h = 0.10p, y -3.5%
-    
-    private var penguinScarf: some View {
-        ScarfShape()
-            .fill(
-                LinearGradient(
-                    colors: [accentColor, accentColor, Color(hex: "0055CC")],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .overlay(
-                ScarfShape()
-                    .stroke(Color(hex: "3399FF").opacity(0.5), lineWidth: p * 0.003)
-            )
-            .frame(width: p * 0.58, height: p * 0.10)
-            .offset(x: reduceMotion ? 0 : scarfSway * 0.5, y: -p * 0.035)
-    }
-    
     // MARK: - Feet (proportional stance for slimmed body)
     //  Slimmed: spacing 0.045p, size 0.16p, splayed ±10°.
     
@@ -1016,7 +1029,9 @@ struct PenguinMascot: View {
             
         case .shy:
             // Tiny sweat drop
-            Text("💧")
+            Image(systemName: "drop.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.cyan.opacity(0.6))
                 .font(.system(size: p * 0.03))
                 .offset(x: p * 0.22, y: -p * 0.28)
                 .opacity(0.7)
@@ -1079,12 +1094,12 @@ struct PenguinMascot: View {
                 swayOffset = AnimationConstants.penguinSwayAmplitude
             }
             // Scarf counter-sway (secondary motion, phase offset)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.5))
                 withAnimation(
                     .easeInOut(duration: AnimationConstants.penguinSwayDuration / 2)
                     .repeatForever(autoreverses: true)
                 ) {
-                    scarfSway = -AnimationConstants.penguinSwayAmplitude * 1.5
                 }
             }
             
@@ -1092,7 +1107,8 @@ struct PenguinMascot: View {
             withAnimation(AnimationConstants.penguinBounce) {
                 bounceOffset = -AnimationConstants.penguinBounceHeight
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.3))
                 withAnimation(AnimationConstants.penguinBounce) {
                     bounceOffset = 0
                 }
@@ -1103,19 +1119,18 @@ struct PenguinMascot: View {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
                 bounceOffset = -AnimationConstants.penguinBounceHeight * 1.5
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.3))
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
                     bounceOffset = 0
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
-                        bounceOffset = -AnimationConstants.penguinBounceHeight
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
-                            bounceOffset = 0
-                        }
-                    }
+                try? await Task.sleep(for: .seconds(0.2))
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
+                    bounceOffset = -AnimationConstants.penguinBounceHeight
+                }
+                try? await Task.sleep(for: .seconds(0.25))
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
+                    bounceOffset = 0
                 }
             }
             // Excited rapid flap (±15°, 4 cycles)
@@ -1140,7 +1155,8 @@ struct PenguinMascot: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
                 bounceOffset = -4
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.2))
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
                     bounceOffset = 0
                 }
@@ -1179,17 +1195,7 @@ struct PenguinMascot: View {
             ) {
                 swayOffset = AnimationConstants.penguinSwayAmplitude * 1.3
             }
-            // Scarf counter-sway with phase offset
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(0.3))
-                guard !Task.isCancelled else { return }
-                withAnimation(
-                    .easeInOut(duration: 1.8)
-                    .repeatForever(autoreverses: true)
-                ) {
-                    scarfSway = -AnimationConstants.penguinSwayAmplitude * 1.5
-                }
-            }
+
         }
     }
     
@@ -1283,13 +1289,16 @@ struct PenguinMascot: View {
         guard [.celebrating, .waving, .happy].contains(expression), !reduceMotion else { return }
         
         // 4 rapid flaps: ±15° at 0.15s period
-        let flapSequence: [(CGFloat, TimeInterval)] = [
-            (15, 0.0), (-15, 0.15), (15, 0.30), (-15, 0.45),
-            (10, 0.60), (-10, 0.75), (5, 0.85), (0, 0.95),
+        let flapSequence: [(angle: CGFloat, delay: TimeInterval)] = [
+            (15, 0.0), (-15, 0.15), (15, 0.15), (-15, 0.15),
+            (10, 0.15), (-10, 0.15), (5, 0.10), (0, 0.10),
         ]
         
-        for (angle, delay) in flapSequence {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+        Task { @MainActor in
+            for (angle, delay) in flapSequence {
+                if delay > 0 {
+                    try? await Task.sleep(for: .seconds(delay))
+                }
                 withAnimation(.spring(response: 0.1, dampingFraction: 0.5)) {
                     self.flipperSway = angle
                 }
@@ -1463,50 +1472,6 @@ struct WingShape: Shape {
                 to: CGPoint(x: w * 0.5, y: 0),
                 control1: CGPoint(x: w * 0.15, y: h * 0.5),
                 control2: CGPoint(x: w * 0.1, y: h * 0.1)
-            )
-            p.closeSubpath()
-        }
-    }
-}
-
-/// Scarf wrapping neck with trailing tail
-struct ScarfShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width
-        let h = rect.height
-        
-        return Path { p in
-            // Main wrap (left to right across neck)
-            p.move(to: CGPoint(x: 0, y: h * 0.25))
-            // Top edge curves up
-            p.addCurve(
-                to: CGPoint(x: w * 0.75, y: h * 0.20),
-                control1: CGPoint(x: w * 0.25, y: 0),
-                control2: CGPoint(x: w * 0.55, y: 0)
-            )
-            // Into the tail
-            p.addCurve(
-                to: CGPoint(x: w, y: h * 0.65),
-                control1: CGPoint(x: w * 0.90, y: h * 0.25),
-                control2: CGPoint(x: w * 1.0, y: h * 0.45)
-            )
-            // Tail tip curves down
-            p.addCurve(
-                to: CGPoint(x: w * 0.72, y: h),
-                control1: CGPoint(x: w * 1.0, y: h * 0.80),
-                control2: CGPoint(x: w * 0.85, y: h * 0.95)
-            )
-            // Tail underside back
-            p.addCurve(
-                to: CGPoint(x: w * 0.65, y: h * 0.50),
-                control1: CGPoint(x: w * 0.65, y: h * 0.85),
-                control2: CGPoint(x: w * 0.60, y: h * 0.60)
-            )
-            // Bottom edge of main wrap
-            p.addCurve(
-                to: CGPoint(x: 0, y: h * 0.55),
-                control1: CGPoint(x: w * 0.45, y: h * 0.55),
-                control2: CGPoint(x: w * 0.15, y: h * 0.50)
             )
             p.closeSubpath()
         }
@@ -1818,4 +1783,29 @@ struct StarEye: Shape {
     }
     
     return AnimationTester()
+}
+
+// MARK: - Scarf / Asset Dev Previews
+// Open PenguinMascot.swift in Xcode → press ⌥⌘↩ to show canvas.
+// Changes to penguinScarf update in the canvas within ~1 second — no build needed.
+
+#Preview("Nudgy — idle", traits: .fixedLayout(width: 300, height: 345)) {
+    PenguinMascot(expression: .idle, size: 200, showBeanie: false)
+        .padding(50)
+        .background(Color(hex: "111111"))
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Nudgy — all expressions", traits: .fixedLayout(width: 680, height: 220)) {
+    HStack(spacing: 24) {
+        ForEach([PenguinExpression.idle, .happy, .waving, .celebrating], id: \.rawValue) { expr in
+            VStack(spacing: 6) {
+                PenguinMascot(expression: expr, size: 120, showBeanie: false)
+                Text(expr.rawValue).font(.caption2).foregroundStyle(.gray)
+            }
+        }
+    }
+    .padding(20)
+    .background(Color(hex: "111111"))
+    .preferredColorScheme(.dark)
 }

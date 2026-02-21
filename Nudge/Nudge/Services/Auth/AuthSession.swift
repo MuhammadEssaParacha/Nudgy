@@ -2,6 +2,7 @@ import Foundation
 import AuthenticationServices
 import CloudKit
 import CryptoKit
+import os
 
 @MainActor @Observable
 final class AuthSession {
@@ -62,9 +63,7 @@ final class AuthSession {
     // MARK: - Bootstrap
 
     func bootstrap() {
-        #if DEBUG
-        print("🔐 AuthSession.bootstrap() called, current state: \(state)")
-        #endif
+        Log.auth.debug("AuthSession.bootstrap() called, current state: \(String(describing: self.state))")
         Task { await restoreSession() }
     }
 
@@ -72,11 +71,24 @@ final class AuthSession {
     func restoreSession() async {
         let method = (try? KeychainService.getString(forKey: Keys.authMethod)) ?? nil
         #if DEBUG
-        print("🔐 AuthSession.restoreSession() — stored method: \(method ?? "nil")")
+        Log.auth.debug("AuthSession.restoreSession() — stored method: \(method ?? "nil")")
+        
+        // DEBUG bypass: nuke all auth Keychain entries so the intro shows fresh
+        if ProcessInfo.processInfo.arguments.contains("-resetAuth") {
+            Log.auth.debug("Resetting auth — clearing all Keychain entries")
+            KeychainService.delete(forKey: Keys.appleUserID)
+            KeychainService.delete(forKey: Keys.localUserID)
+            KeychainService.delete(forKey: Keys.authMethod)
+            KeychainService.delete(forKey: Keys.emailAddress)
+            KeychainService.delete(forKey: Keys.emailPassHash)
+            KeychainService.delete(forKey: Keys.displayName)
+            state = .signedOut(reason: nil)
+            return
+        }
         
         // DEBUG bypass: skip auth for simulator testing
         if ProcessInfo.processInfo.arguments.contains("-skipAuth") {
-            print("🔐 DEBUG: Skipping auth — creating test user")
+            Log.auth.debug("Skipping auth — creating test user")
             state = .signedIn(UserContext(
                 userID: "debug-test-user",
                 displayName: "Test User",
@@ -97,9 +109,7 @@ final class AuthSession {
 
         default:
             // No stored session
-            #if DEBUG
-            print("🔐 AuthSession: no stored method → .signedOut")
-            #endif
+            Log.auth.debug("AuthSession: no stored method → .signedOut")
             state = .signedOut(reason: nil)
         }
     }
@@ -107,14 +117,20 @@ final class AuthSession {
     // MARK: - Apple Sign In
 
     func completeAppleSignIn(with credential: ASAuthorizationAppleIDCredential) async {
-        #if DEBUG
-        print("🔐 completeAppleSignIn: start — user=\(credential.user.prefix(8))...")
-        #endif
+        Log.auth.debug("completeAppleSignIn: start — user=\(credential.user.prefix(8))...")
         // Persist Apple user ID
         if !credential.user.isEmpty {
-            try? KeychainService.setString(credential.user, forKey: Keys.appleUserID)
+            do {
+                try KeychainService.setString(credential.user, forKey: Keys.appleUserID)
+            } catch {
+                Log.auth.error("Failed to save Apple user ID to Keychain: \(error, privacy: .public)")
+            }
         }
-        try? KeychainService.setString(AuthMethod.apple.rawValue, forKey: Keys.authMethod)
+        do {
+            try KeychainService.setString(AuthMethod.apple.rawValue, forKey: Keys.authMethod)
+        } catch {
+            Log.auth.error("Failed to save auth method to Keychain: \(error, privacy: .public)")
+        }
 
         let nameComponents = credential.fullName
         let displayName = [nameComponents?.givenName, nameComponents?.familyName]
@@ -122,34 +138,34 @@ final class AuthSession {
             .joined(separator: " ")
         let finalName = displayName.isEmpty ? nil : displayName
         if let finalName {
-            try? KeychainService.setString(finalName, forKey: Keys.displayName)
+            do {
+                try KeychainService.setString(finalName, forKey: Keys.displayName)
+            } catch {
+                Log.auth.error("Failed to save display name to Keychain: \(error, privacy: .public)")
+            }
         }
 
         let email = credential.email
         if let email {
-            try? KeychainService.setString(email, forKey: Keys.emailAddress)
+            do {
+                try KeychainService.setString(email, forKey: Keys.emailAddress)
+            } catch {
+                Log.auth.error("Failed to save email to Keychain: \(error, privacy: .public)")
+            }
         }
 
         // Try CloudKit if available — otherwise use Apple user ID as local identifier
-        #if DEBUG
-        print("🔐 completeAppleSignIn: resolving userID + cloudKit...")
-        #endif
+        Log.auth.debug("completeAppleSignIn: resolving userID + cloudKit...")
         let userID = await resolveUserID(fallback: credential.user)
         let cloudKitAvailable = await isCloudKitAvailable()
-        #if DEBUG
-        print("🔐 completeAppleSignIn: userID=\(userID.prefix(8))..., ck=\(cloudKitAvailable)")
-        #endif
+        Log.auth.debug("completeAppleSignIn: userID=\(userID.prefix(8))..., ck=\(cloudKitAvailable)")
 
         if cloudKitAvailable {
             // Best-effort profile sync
-            #if DEBUG
-            print("🔐 completeAppleSignIn: syncing CK profile")
-            #endif
+            Log.auth.debug("completeAppleSignIn: syncing CK profile")
             _ = try? await cloudKitManager.ensureUserProfile(displayName: finalName)
         }
-        #if DEBUG
-        print("🔐 completeAppleSignIn: setting state → .signedIn")
-        #endif
+        Log.auth.debug("completeAppleSignIn: setting state → .signedIn")
 
         state = .signedIn(UserContext(
             userID: userID,
@@ -358,6 +374,7 @@ final class AuthSession {
             let recordID = try await cloudKitManager.fetchUserRecordID()
             return recordID.recordName
         } catch {
+            Log.auth.info("[Auth] CloudKit user ID unavailable, using local fallback: \(error, privacy: .public)")
             return fallback
         }
     }

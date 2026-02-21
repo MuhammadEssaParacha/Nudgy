@@ -104,6 +104,7 @@ struct NudgyChatView: View {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(DesignTokens.textTertiary)
                     }
+                    .nudgeAccessibility(label: String(localized: "Dismiss error"), hint: nil, traits: .isButton)
                 }
                 .padding(.horizontal, DesignTokens.spacingLG)
                 .padding(.vertical, DesignTokens.spacingSM)
@@ -552,6 +553,9 @@ struct NudgyChatView: View {
                     let (resolved, _) = await ContactResolver.shared.resolveActionTarget(name: contactName, for: .call)
                     if let number = resolved {
                         ActionService.openCall(number: number)
+                    } else {
+                        HapticService.shared.error()
+                        NotificationCenter.default.post(name: .nudgeNeedsContactPicker, object: nil)
                     }
                 }
             }
@@ -569,6 +573,9 @@ struct NudgyChatView: View {
                     let (resolved, _) = await ContactResolver.shared.resolveActionTarget(name: contactName, for: .email)
                     if let email = resolved {
                         ActionService.openEmail(to: email, subject: draftSubject.isEmpty ? nil : draftSubject, body: draftBody.isEmpty ? nil : draftBody)
+                    } else {
+                        HapticService.shared.error()
+                        NotificationCenter.default.post(name: .nudgeNeedsContactPicker, object: nil)
                     }
                 }
             }
@@ -585,6 +592,12 @@ struct NudgyChatView: View {
             if let url = URL(string: target) {
                 browserURL = url
             }
+        case "ALARM":
+            NotificationCenter.default.post(
+                name: .nudgeSetAlarm,
+                object: nil,
+                userInfo: ["content": target, "itemID": ""]
+            )
         case "EMAIL_DRAFT", "TEXT_DRAFT":
             // Draft already shown via side effect — no additional action needed
             break
@@ -605,6 +618,9 @@ struct NudgyChatView: View {
                     let (resolved, _) = await ContactResolver.shared.resolveActionTarget(name: draft.recipientName, for: .email)
                     if let email = resolved {
                         ActionService.openEmail(to: email, subject: draft.subject, body: draft.body)
+                    } else {
+                        HapticService.shared.error()
+                        NotificationCenter.default.post(name: .nudgeNeedsContactPicker, object: nil)
                     }
                 }
             }
@@ -624,6 +640,9 @@ struct NudgyChatView: View {
                             object: nil,
                             userInfo: ["recipient": phone, "body": draft.body, "itemID": ""]
                         )
+                    } else {
+                        HapticService.shared.error()
+                        NotificationCenter.default.post(name: .nudgeNeedsContactPicker, object: nil)
                     }
                 }
             }

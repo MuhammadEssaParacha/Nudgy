@@ -23,8 +23,9 @@ struct YouSettingsView: View {
     @State private var showPaywall = false
     @State private var selectedVoice: String = NudgyConfig.Voice.openAIVoice
     @State private var isPreviewingVoice = false
-    @State private var showPersonaPicker = false
     @State private var showRemindersImport = false
+    @State private var showADHDProfile = false
+    @State private var showSignOutConfirmation = false
 
     private let liveActivityTip = LiveActivityTip()
 
@@ -138,6 +139,21 @@ struct YouSettingsView: View {
                             .buttonStyle(.plain)
                         }
 
+                        // MARK: Categories
+
+                        settingsSection(title: String(localized: "Categories")) {
+                            NavigationLink {
+                                CategoryPreferencesView()
+                            } label: {
+                                settingsRow(
+                                    icon: "square.grid.2x2.fill",
+                                    title: String(localized: "Category Preferences"),
+                                    subtitle: String(localized: "Priority categories & notification controls")
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         // MARK: Import
 
                         settingsSection(title: String(localized: "Import")) {
@@ -230,6 +246,88 @@ struct YouSettingsView: View {
                                         }
                                     }
                                 }
+                                
+                                Divider()
+                                    .overlay(Color.white.opacity(0.06))
+
+                                // Phase 14: Nudgy's personality mode picker
+                                VStack(alignment: .leading, spacing: DesignTokens.spacingSM) {
+                                    settingsRow(
+                                        icon: settings.nudgyPersonalityMode.icon,
+                                        title: String(localized: "Nudgy's Style"),
+                                        subtitle: settings.nudgyPersonalityMode.description
+                                    )
+                                    
+                                    HStack(spacing: 6) {
+                                        ForEach(NudgyPersonalityMode.allCases, id: \.self) { mode in
+                                            Button {
+                                                HapticService.shared.actionButtonTap()
+                                                settings.nudgyPersonalityMode = mode
+                                                NudgyEngine.shared.syncADHDProfile(settings: settings)
+                                            } label: {
+                                                VStack(spacing: 3) {
+                                                    Image(systemName: mode.icon)
+                                                        .font(.system(size: 14, weight: .semibold))
+                                                        .foregroundStyle(settings.nudgyPersonalityMode == mode
+                                                            ? Color(hex: mode.accentColorHex)
+                                                            : .white.opacity(0.35))
+                                                    Text(mode.label.components(separatedBy: " ").first ?? "")
+                                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                                        .foregroundStyle(settings.nudgyPersonalityMode == mode
+                                                            ? .white.opacity(0.9)
+                                                            : .white.opacity(0.35))
+                                                }
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 8)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 10)
+                                                        .fill(settings.nudgyPersonalityMode == mode
+                                                            ? Color(hex: mode.accentColorHex).opacity(0.2)
+                                                            : Color.white.opacity(0.05))
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                            .nudgeAccessibility(label: "\(mode.label) — \(mode.description)", traits: .isButton)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // MARK: Medication (Phase 9)
+
+                        settingsSection(title: String(localized: "Medication")) {
+                            VStack(spacing: DesignTokens.spacingMD) {
+                                Toggle(isOn: $settings.medicationEnabled) {
+                                    settingsRow(
+                                        icon: "pills.fill",
+                                        title: String(localized: "I take ADHD medication"),
+                                        subtitle: String(localized: "Nudgy gives gentle focus-window hints based on timing")
+                                    )
+                                }
+                                .tint(DesignTokens.accentActive)
+                                
+                                if settings.medicationEnabled {
+                                    Divider()
+                                        .overlay(Color.white.opacity(0.06))
+                                    
+                                    settingsRow(
+                                        icon: "clock.fill",
+                                        title: String(localized: "Usually taken at")
+                                    )
+                                    
+                                    DatePicker(
+                                        String(localized: "Medication time"),
+                                        selection: $settings.medicationTime,
+                                        displayedComponents: .hourAndMinute
+                                    )
+                                    .datePickerStyle(.wheel)
+                                    .frame(height: 100)
+                                    .labelsHidden()
+                                    .onChange(of: settings.medicationTime) { _, _ in
+                                        NudgyEngine.shared.syncADHDProfile(settings: settings)
+                                    }
+                                }
                             }
                         }
 
@@ -237,26 +335,32 @@ struct YouSettingsView: View {
 
                         settingsSection(title: String(localized: "Your Style")) {
                             VStack(spacing: DesignTokens.spacingSM) {
+                                // ADHD Profile — age group, challenge, and personality mode
                                 Button {
-                                    showPersonaPicker = true
+                                    showADHDProfile = true
                                 } label: {
                                     HStack(spacing: DesignTokens.spacingMD) {
-                                        Image(systemName: settings.selectedPersona.icon)
+                                        Image(systemName: "slider.horizontal.3")
                                             .font(.system(size: 16))
-                                            .foregroundStyle(Color(hex: settings.selectedPersona.accentColorHex))
+                                            .foregroundStyle(Color(hex: "4FC3F7"))
                                             .frame(width: 24)
-
+                                        
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text(settings.selectedPersona.label)
+                                            Text(String(localized: "ADHD Profile"))
                                                 .font(AppTheme.body)
                                                 .foregroundStyle(DesignTokens.textPrimary)
-                                            Text(String(localized: "Tap to change how Nudgy adapts"))
+                                            Text(String(localized: "Your challenge focus, age group, and Nudgy's style"))
                                                 .font(AppTheme.footnote)
                                                 .foregroundStyle(DesignTokens.textSecondary)
                                         }
-
+                                        
                                         Spacer()
-
+                                        
+                                        if settings.hasCompletedADHDProfile {
+                                            Text(settings.adhdBiggestChallenge.emoji)
+                                                .font(.system(size: 14))
+                                        }
+                                        
                                         Image(systemName: "chevron.right")
                                             .font(.system(size: 12))
                                             .foregroundStyle(DesignTokens.textTertiary)
@@ -329,7 +433,7 @@ struct YouSettingsView: View {
 
                         settingsSection(title: String(localized: "Account")) {
                             Button {
-                                auth.signOut()
+                                showSignOutConfirmation = true
                             } label: {
                                 settingsRow(
                                     icon: "rectangle.portrait.and.arrow.right",
@@ -338,6 +442,17 @@ struct YouSettingsView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .confirmationDialog(
+                                String(localized: "Sign Out?"),
+                                isPresented: $showSignOutConfirmation,
+                                titleVisibility: .visible
+                            ) {
+                                Button(String(localized: "Sign Out"), role: .destructive) {
+                                    auth.signOut()
+                                }
+                            } message: {
+                                Text(String(localized: "Make sure your tasks are synced to iCloud before signing out."))
+                            }
                         }
 
                         // Bottom padding
@@ -371,9 +486,13 @@ struct YouSettingsView: View {
         .sheet(isPresented: $showPaywall) {
             PaywallView()
         }
-        .sheet(isPresented: $showPersonaPicker) {
-            PersonaPickerView()
+        .sheet(isPresented: $showADHDProfile) {
+            ADHDProfileSetupView()
                 .presentationDetents([.large])
+                .onDisappear {
+                    // Re-sync engines after profile edits
+                    NudgyEngine.shared.syncADHDProfile(settings: settings)
+                }
         }
         .sheet(isPresented: $showRemindersImport) {
             RemindersImportView()

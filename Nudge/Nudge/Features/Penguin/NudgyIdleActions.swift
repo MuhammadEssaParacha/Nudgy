@@ -112,8 +112,9 @@ final class NudgyIdleActions {
         }
 
         // Schedule next action after this one completes
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.scheduleNext()
+        Task {
+            try? await Task.sleep(for: .seconds(3.0))
+            self.scheduleNext()
         }
     }
 
@@ -122,27 +123,30 @@ final class NudgyIdleActions {
     private func performLookAround(_ state: PenguinState) {
         state.expression = .nudging
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        Task {
+            try? await Task.sleep(for: .seconds(2.0))
             state.expression = .idle
-            self?.clearReaction()
+            self.clearReaction()
         }
     }
 
     private func performScratchHead(_ state: PenguinState) {
         state.expression = .thinking
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
             state.expression = .idle
-            self?.clearReaction()
+            self.clearReaction()
         }
     }
 
     private func performYawn(_ state: PenguinState) {
         state.expression = .sleeping
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        Task {
+            try? await Task.sleep(for: .seconds(2.0))
             state.expression = .idle
-            self?.clearReaction()
+            self.clearReaction()
         }
     }
 
@@ -150,7 +154,8 @@ final class NudgyIdleActions {
         state.expression = .happy
         HapticService.shared.prepare()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
             state.expression = .idle
             let _ = self // prevent warning
         }
@@ -160,12 +165,12 @@ final class NudgyIdleActions {
         state.expression = .celebrating
         HapticService.shared.prepare()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
             state.expression = .happy
-            self?.clearReaction()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                state.expression = .idle
-            }
+            self.clearReaction()
+            try? await Task.sleep(for: .seconds(0.5))
+            state.expression = .idle
         }
     }
 
@@ -173,17 +178,19 @@ final class NudgyIdleActions {
         state.expression = .waving
         HapticService.shared.prepare()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        Task {
+            try? await Task.sleep(for: .seconds(2.0))
             state.expression = .idle
-            self?.clearReaction()
+            self.clearReaction()
         }
     }
 
     // MARK: - Helpers
 
     private func clearReaction() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.idleReaction = nil
+        Task {
+            try? await Task.sleep(for: .seconds(0.5))
+            self.idleReaction = nil
         }
     }
 }
@@ -205,7 +212,8 @@ struct IdleHopModifier: ViewModifier {
                         bounce = -14
                     }
                     // Settle back
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(0.25))
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
                             bounce = 0
                         }

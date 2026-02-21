@@ -59,7 +59,9 @@ struct ChallengeProgressBadge: View {
                         Text("· +\(challenge.bonusFish)")
                             .font(AppTheme.caption)
                             .foregroundStyle(DesignTokens.goldCurrency)
-                        SnowflakeIcon(size: 10)
+                        Image(systemName: "fish.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DesignTokens.goldCurrency)
                     }
                 }
                 
@@ -80,7 +82,7 @@ struct ChallengeProgressBadge: View {
                 )
         }
         .nudgeAccessibility(
-            label: String(localized: "Daily challenge: \(challenge.title). Bonus: \(challenge.bonusFish) snowflakes"),
+            label: String(localized: "Daily challenge: \(challenge.title). Bonus: \(challenge.bonusFish) fish"),
             hint: nil,
             traits: .isStaticText
         )
@@ -135,6 +137,8 @@ struct ChallengeProgressBadge: View {
             return (RewardService.shared.tasksCompletedToday > 0 ? 1 : 0, 1)
         case .completeBeforeNoon:
             return (0, 1)
+        case .completeCategory(_, let count):
+            return (challenge.isCompleted ? count : 0, count)
         }
     }
 }

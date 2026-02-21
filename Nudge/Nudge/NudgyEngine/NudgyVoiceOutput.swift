@@ -5,19 +5,20 @@
 //  Phase 11: Modular text-to-speech output.
 //  Supports two backends:
 //  1. AVSpeechSynthesizer (on-device, free, instant fallback)
-//  2. OpenAI TTS API (higher quality, cute "shimmer" voice — default)
+//  2. OpenAI TTS API (higher quality, warm "echo" voice — default)
 //
 //  The active backend is selected via NudgyConfig.Voice.useOpenAITTS.
-//  OpenAI TTS is preferred for Nudgy's warm, cute personality.
+//  OpenAI TTS is preferred for Nudgy’s warm, Pooh-like masculine warmth.
 //
 
 import AVFoundation
 import Foundation
+import os
 
 // MARK: - NudgyVoiceOutput
 
 /// Manages Nudgy's text-to-speech voice output.
-/// Supports OpenAI TTS (shimmer voice, default) with AVSpeechSynthesizer fallback.
+/// Supports OpenAI TTS (echo voice, default) with AVSpeechSynthesizer fallback.
 @MainActor @Observable
 final class NudgyVoiceOutput: NSObject {
     
@@ -44,7 +45,20 @@ final class NudgyVoiceOutput: NSObject {
     private var isProcessingQueue = false
     
     /// The preferred AVSpeech voice (fallback only).
+    /// Prefers a warm male voice for Pooh-like quality.
     private var systemVoice: AVSpeechSynthesisVoice? {
+        // Try to find a warm male en-US voice (Aaron, Daniel, etc.)
+        let enUSVoices = AVSpeechSynthesisVoice.speechVoices().filter {
+            $0.language.hasPrefix("en") && $0.quality != .default
+        }
+        // Prefer enhanced/premium male voices by identifier keywords
+        if let male = enUSVoices.first(where: { $0.identifier.lowercased().contains("aaron") }) {
+            return male
+        }
+        if let male = enUSVoices.first(where: { $0.identifier.lowercased().contains("daniel") }) {
+            return male
+        }
+        // Fallback to any en-US voice
         if let voice = AVSpeechSynthesisVoice(language: "en-US") {
             return voice
         }
@@ -65,9 +79,7 @@ final class NudgyVoiceOutput: NSObject {
             try session.setCategory(.playback, mode: .default, options: [.duckOthers])
             try session.setActive(true)
         } catch {
-            #if DEBUG
-            print("⚠️ NudgyVoiceOutput: Audio session config failed: \(error)")
-            #endif
+            Log.ai.warning("NudgyVoiceOutput: Audio session config failed: \(error, privacy: .public)")
         }
     }
     
@@ -83,20 +95,20 @@ final class NudgyVoiceOutput: NSObject {
     @discardableResult
     func speak(_ text: String) -> Bool {
         guard NudgyConfig.Voice.isEnabled else {
-            print("🔇 NudgyVoiceOutput: Voice disabled, skipping")
+            Log.ai.debug("NudgyVoiceOutput: Voice disabled, skipping")
             return false
         }
         
         let cleaned = cleanForSpeech(text)
         guard !cleaned.isEmpty else {
-            print("🔇 NudgyVoiceOutput: Text empty after cleaning, skipping")
+            Log.ai.debug("NudgyVoiceOutput: Text empty after cleaning, skipping")
             return false
         }
-        print("🐧 NudgyVoiceOutput: speak() called with: \(cleaned.prefix(80))")
+        Log.ai.debug("NudgyVoiceOutput: speak() called with: \(cleaned.prefix(80))")
         
         // If already speaking, queue it
         if isSpeaking {
-            print("🐧 NudgyVoiceOutput: Already speaking, queueing")
+            Log.ai.debug("NudgyVoiceOutput: Already speaking, queueing")
             speechQueue.append(cleaned)
             return true
         }
@@ -167,7 +179,7 @@ final class NudgyVoiceOutput: NSObject {
             try session.setCategory(.playback, mode: .default, options: [.duckOthers])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
-            print("⚠️ NudgyVoiceOutput: Audio session setup failed: \(error)")
+            Log.ai.warning("NudgyVoiceOutput: Audio session setup failed: \(error, privacy: .public)")
         }
         
         let utterance = AVSpeechUtterance(string: text)
@@ -178,11 +190,11 @@ final class NudgyVoiceOutput: NSObject {
         utterance.preUtteranceDelay = 0.2
         utterance.postUtteranceDelay = 0.1
         
-        print("🔊 NudgyVoiceOutput: Speaking (system): \(text.prefix(60))...")
+        Log.ai.debug("NudgyVoiceOutput: Speaking (system): \(text.prefix(60))...")
         synthesizer.speak(utterance)
     }
     
-    // MARK: - OpenAI TTS (Primary — cute shimmer voice)
+    // MARK: - OpenAI TTS (Primary — warm echo voice)
     
     private func speakWithOpenAI(_ text: String) {
         Task {
@@ -208,13 +220,11 @@ final class NudgyVoiceOutput: NSObject {
                 player.delegate = self
                 self.audioPlayer = player
                 
-                print("🔊 NudgyVoiceOutput: Speaking (OpenAI \(NudgyConfig.Voice.openAIVoice)): \(text.prefix(60))... [\(String(format: "%.1f", player.duration))s]")
+                Log.ai.debug("NudgyVoiceOutput: Speaking (OpenAI \(NudgyConfig.Voice.openAIVoice)): \(text.prefix(60))... [\(String(format: "%.1f", player.duration))s]")
                 player.play()
                 
             } catch {
-                #if DEBUG
-                print("⚠️ OpenAI TTS failed: \(error). Falling back to system TTS.")
-                #endif
+                Log.ai.warning("OpenAI TTS failed: \(error, privacy: .public). Falling back to system TTS.")
                 self.speakWithSystem(text)
             }
         }
@@ -239,7 +249,7 @@ final class NudgyVoiceOutput: NSObject {
         } else {
             isSpeaking = false
             isProcessingQueue = false
-            print("🔊 NudgyVoiceOutput: All speech finished")
+            Log.ai.debug("NudgyVoiceOutput: All speech finished")
         }
     }
     
@@ -277,17 +287,17 @@ final class NudgyVoiceOutput: NSObject {
 
 extension NudgyVoiceOutput: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        print("🔊 NudgyVoiceOutput: didStart speaking (system)")
+        Log.ai.debug("NudgyVoiceOutput: didStart speaking (system)")
         Task { @MainActor in self.isSpeaking = true }
     }
     
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        print("🔊 NudgyVoiceOutput: didFinish speaking (system)")
+        Log.ai.debug("NudgyVoiceOutput: didFinish speaking (system)")
         Task { @MainActor in self.finishedSpeaking() }
     }
     
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        print("🔊 NudgyVoiceOutput: didCancel speaking (system)")
+        Log.ai.debug("NudgyVoiceOutput: didCancel speaking (system)")
         Task { @MainActor in
             self.cleanupTempFile()
             self.isSpeaking = false
@@ -300,12 +310,12 @@ extension NudgyVoiceOutput: AVSpeechSynthesizerDelegate {
 
 extension NudgyVoiceOutput: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        print("🔊 NudgyVoiceOutput: didFinish playing (OpenAI, success=\(flag))")
+        Log.ai.debug("NudgyVoiceOutput: didFinish playing (OpenAI, success=\(flag))")
         Task { @MainActor in self.finishedSpeaking() }
     }
     
     nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: (any Error)?) {
-        print("⚠️ NudgyVoiceOutput: decode error: \(error?.localizedDescription ?? "unknown")")
+        Log.ai.warning("NudgyVoiceOutput: decode error: \(error?.localizedDescription ?? "unknown")")
         Task { @MainActor in self.finishedSpeaking() }
     }
 }

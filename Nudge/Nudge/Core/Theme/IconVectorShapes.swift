@@ -9,7 +9,6 @@
 //
 //  Icons:
 //  - FlameShape / FlameIcon     — streak fire
-//  - SnowflakeShape / SnowflakeIcon — snowflake currency
 //  - MiniFishIcon               — compact fish for counters (reuses FishShape)
 //
 
@@ -153,90 +152,6 @@ struct FlameIcon: View {
     }
 }
 
-// MARK: - Snowflake Shape
-
-/// A six-armed snowflake with beveled tips — geometric but slightly soft.
-/// Arms are drawn as individual line paths, not as filled regions,
-/// so the shape stays delicate at small sizes.
-struct SnowflakeShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let cx = rect.midX
-        let cy = rect.midY
-        let r = min(rect.width, rect.height) / 2
-        
-        return Path { p in
-            // 6 main arms at 60° intervals
-            for i in 0..<6 {
-                let angle = Double(i) * .pi / 3 - .pi / 2 // start at top
-                let cosA = CGFloat(cos(angle))
-                let sinA = CGFloat(sin(angle))
-                
-                // Main arm line
-                p.move(to: CGPoint(x: cx, y: cy))
-                p.addLine(to: CGPoint(
-                    x: cx + cosA * r,
-                    y: cy + sinA * r
-                ))
-                
-                // Branch pair at ~60% out
-                let branchStart = r * 0.55
-                let branchLen = r * 0.35
-                let bx = cx + cosA * branchStart
-                let by = cy + sinA * branchStart
-                
-                for side in [-1.0, 1.0] {
-                    let bAngle = angle + side * .pi / 4
-                    p.move(to: CGPoint(x: bx, y: by))
-                    p.addLine(to: CGPoint(
-                        x: bx + CGFloat(cos(bAngle)) * branchLen,
-                        y: by + CGFloat(sin(bAngle)) * branchLen
-                    ))
-                }
-            }
-        }
-    }
-}
-
-/// Complete snowflake icon with gradient stroke and a subtle center dot.
-struct SnowflakeIcon: View {
-    var size: CGFloat = 16
-    
-    var body: some View {
-        ZStack {
-            // Main crystal arms
-            SnowflakeShape()
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.95),
-                            DesignTokens.snowflakeTint
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    style: StrokeStyle(
-                        lineWidth: max(1.2, size * 0.08),
-                        lineCap: .round,
-                        lineJoin: .round
-                    )
-                )
-            
-            // Center crystal node
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color.white, DesignTokens.snowflakeTint],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: size * 0.1
-                    )
-                )
-                .frame(width: size * 0.18, height: size * 0.18)
-        }
-        .frame(width: size, height: size)
-    }
-}
-
 // MARK: - Mini Fish Icon (for counters)
 
 /// Compact fish icon for stats pills and counters.
@@ -316,14 +231,6 @@ struct MiniFishIcon: View {
                 FlameIcon(size: 32)
             }
             
-            // Snowflake sizes
-            HStack(spacing: 24) {
-                SnowflakeIcon(size: 12)
-                SnowflakeIcon(size: 16)
-                SnowflakeIcon(size: 24)
-                SnowflakeIcon(size: 32)
-            }
-            
             // Mini fish species
             HStack(spacing: 16) {
                 MiniFishIcon(size: 14, species: nil)
@@ -354,16 +261,6 @@ struct MiniFishIcon: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(Capsule().fill(DesignTokens.streakOrange.opacity(0.08)))
-                
-                HStack(spacing: 4) {
-                    SnowflakeIcon(size: 12)
-                    Text("47")
-                        .font(AppTheme.rounded(.caption, weight: .bold))
-                        .foregroundStyle(DesignTokens.snowflakeTint)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(DesignTokens.snowflakeTint.opacity(0.06)))
             }
         }
     }

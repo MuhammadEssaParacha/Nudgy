@@ -2,8 +2,8 @@
 //  StatsStripView.swift
 //  Nudge
 //
-//  Compressed stats bar at the top of the Nudges page.
-//  Shows: fish caught today, streak (with multiplier), snowflake balance, tasks done.
+//  Compressed stats bar below the action zone on the Nudges page.
+//  Shows: fish caught today, streak (with multiplier), fish balance, tasks done.
 //
 //  Replaces the larger DailyProgressHeader with a compact,
 //  information-dense strip that doesn't steal focus from the hero card.
@@ -17,7 +17,7 @@ struct StatsStripView: View {
     let totalToday: Int
     let streak: Int
     let fishToday: Int
-    let snowflakes: Int
+    let fish: Int
     let lastSpecies: FishSpecies?
     var onFishHUDPosition: ((CGPoint) -> Void)? = nil
     
@@ -45,8 +45,8 @@ struct StatsStripView: View {
             
             Spacer(minLength: 4)
             
-            // Snowflake balance
-            snowflakePill
+            // Fish balance
+            fishBalancePill
             
             Spacer(minLength: 4)
             
@@ -153,32 +153,34 @@ struct StatsStripView: View {
         .nudgeAccessibility(
             label: String(localized: "\(streak) day streak"),
             hint: hasStreakMultiplier
-                ? String(localized: "Double snowflakes active")
-                : String(localized: "Complete tasks 3 days in a row for double snowflakes"),
+                ? String(localized: "Double fish active")
+                : String(localized: "Complete tasks 3 days in a row for double fish"),
             traits: .isStaticText
         )
     }
     
-    // MARK: - Snowflake Pill
+    // MARK: - Fish Balance Pill
     
-    private var snowflakePill: some View {
+    private var fishBalancePill: some View {
         HStack(spacing: 3) {
-            SnowflakeIcon(size: 12)
+            Image(systemName: "fish.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(DesignTokens.goldCurrency)
             
-            Text("\(snowflakes)")
+            Text("\(fish)")
                 .font(AppTheme.rounded(.caption, weight: .bold))
-                .foregroundStyle(DesignTokens.snowflakeTint)
+                .foregroundStyle(DesignTokens.fishTint)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background {
             Capsule()
-                .fill(DesignTokens.snowflakeTint.opacity(0.06))
+                .fill(DesignTokens.fishTint.opacity(0.06))
         }
         .glassEffect(.regular.interactive(), in: .capsule)
         .nudgeAccessibility(
-            label: String(localized: "\(snowflakes) snowflakes"),
-            hint: String(localized: "Spend snowflakes on penguin accessories"),
+            label: String(localized: "\(fish) fish"),
+            hint: String(localized: "Spend fish on penguin accessories"),
             traits: .isStaticText
         )
     }
@@ -238,7 +240,7 @@ struct StatsStripView: View {
                 totalToday: 5,
                 streak: 5,
                 fishToday: 3,
-                snowflakes: 47,
+                fish: 47,
                 lastSpecies: .tropical
             )
             
@@ -247,7 +249,7 @@ struct StatsStripView: View {
                 totalToday: 5,
                 streak: 1,
                 fishToday: 5,
-                snowflakes: 120,
+                fish: 120,
                 lastSpecies: .swordfish
             )
             
@@ -256,7 +258,7 @@ struct StatsStripView: View {
                 totalToday: 3,
                 streak: 0,
                 fishToday: 0,
-                snowflakes: 8,
+                fish: 8,
                 lastSpecies: nil
             )
         }

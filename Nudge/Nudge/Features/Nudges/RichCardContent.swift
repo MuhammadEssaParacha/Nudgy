@@ -179,11 +179,16 @@ struct FishRewardBadge: View {
     
     var body: some View {
         HStack(spacing: 3) {
-            Text(species.emoji)
-                .font(.system(size: 10))
-            Text("+\(species.snowflakeValue)❄️")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(DesignTokens.textTertiary)
+            Image(systemName: species.icon)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color(hex: species.glowColorHex))
+            HStack(spacing: 1) {
+                Text("+\(species.fishValue)")
+                Image(systemName: "fish.fill")
+                    .font(.system(size: 7))
+            }
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(DesignTokens.textTertiary)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)

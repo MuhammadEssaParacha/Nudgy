@@ -17,12 +17,13 @@
 import Foundation
 import FoundationModels
 import SwiftData
+import os
 
 // MARK: - Generable Types
 
 /// A single task extracted from a brain dump transcript.
 @Generable(description: "An actionable task extracted from a spoken brain dump")
-struct SplitTask {
+struct SplitTask: Equatable {
     @Guide(description: "Short clear task, max 8 words")
     var task: String
     
@@ -177,9 +178,7 @@ final class AIService {
             let tasks = response.content.tasks
             return tasks.isEmpty ? fallbackSingleTask(transcript) : tasks
         } catch {
-            #if DEBUG
-            print("⚠️ Foundation Models task splitting failed: \(error)")
-            #endif
+            Log.ai.warning("Foundation Models task splitting failed: \(error, privacy: .public)")
             return fallbackSingleTask(transcript)
         }
     }

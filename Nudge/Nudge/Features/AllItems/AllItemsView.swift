@@ -13,6 +13,13 @@ import TipKit
 
 struct AllItemsView: View {
     
+    // MARK: - Group Mode
+    
+    enum GroupMode: String, CaseIterable {
+        case byStatus = "Status"
+        case byCategory = "Category"
+    }
+    
     @Environment(\.modelContext) private var modelContext
     @Environment(PenguinState.self) private var penguinState
     
@@ -23,6 +30,8 @@ struct AllItemsView: View {
     @State private var editingItem: NudgeItem?
     @State private var showEditSheet = false
     @State private var showSnoozeFor: NudgeItem?
+    @State private var categoryFilter: TaskCategory? = nil
+    @State private var groupMode: GroupMode = .byStatus
     
     // Tips
     private let shareTip = ShareTip()
@@ -32,6 +41,8 @@ struct AllItemsView: View {
     @State private var undoPreviousSortOrder: Int = 0
     @State private var showUndoToast = false
     @State private var undoTimerTask: Task<Void, Never>?
+    @State private var itemToDelete: NudgeItem?
+    @State private var showDeleteConfirmation = false
     
     var body: some View {
         ZStack {
@@ -46,7 +57,25 @@ struct AllItemsView: View {
                         .padding(.horizontal, DesignTokens.spacingLG)
                         .padding(.top, DesignTokens.spacingSM)
                     
-                    listContent
+                    // Category filter strip
+                    if allCategories.count >= 2 {
+                        categoryFilterRow
+                            .padding(.horizontal, DesignTokens.spacingLG)
+                            .padding(.vertical, DesignTokens.spacingSM)
+                    }
+                    
+                    // Group mode picker
+                    if allCategories.count >= 2 {
+                        groupModePicker
+                            .padding(.horizontal, DesignTokens.spacingLG)
+                            .padding(.bottom, DesignTokens.spacingSM)
+                    }
+                    
+                    if groupMode == .byCategory && categoryFilter == nil {
+                        categoryGroupedList
+                    } else {
+                        listContent
+                    }
                 }
             }
             
@@ -82,16 +111,223 @@ struct AllItemsView: View {
             .presentationDragIndicator(.visible)
             .presentationBackground(DesignTokens.cardSurface)
         }
+        .confirmationDialog(
+            String(localized: "Delete this task?"),
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "Delete"), role: .destructive) {
+                if let item = itemToDelete {
+                    HapticService.shared.error()
+                    repository?.delete(item)
+                    refreshData()
+                }
+                itemToDelete = nil
+            }
+            Button(String(localized: "Cancel"), role: .cancel) {
+                itemToDelete = nil
+            }
+        } message: {
+            Text(String(localized: "This task will be permanently deleted."))
+        }
+    }
+    
+    // MARK: - Category Filter
+    
+    private var allCategories: [TaskCategory] {
+        var seen = Set<TaskCategory>()
+        var result: [TaskCategory] = []
+        let allItems = activeItems + snoozedItems + doneItems
+        for item in allItems {
+            let cat = item.resolvedCategory
+            if cat != .general && seen.insert(cat).inserted {
+                result.append(cat)
+            }
+        }
+        return result.sorted { $0.label < $1.label }
+    }
+    
+    private func filtered(_ items: [NudgeItem]) -> [NudgeItem] {
+        guard let filter = categoryFilter else { return items }
+        return items.filter { $0.resolvedCategory == filter }
+    }
+    
+    private var categoryFilterRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DesignTokens.spacingXS) {
+                Button {
+                    withAnimation(AnimationConstants.springSmooth) { categoryFilter = nil }
+                } label: {
+                    Text(String(localized: "All"))
+                        .font(.system(size: 12, weight: categoryFilter == nil ? .bold : .medium))
+                        .foregroundStyle(categoryFilter == nil ? .white : DesignTokens.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(categoryFilter == nil ? DesignTokens.accentActive.opacity(0.3) : Color.white.opacity(0.05))
+                        )
+                }
+                .buttonStyle(.plain)
+                
+                ForEach(allCategories, id: \.self) { cat in
+                    Button {
+                        withAnimation(AnimationConstants.springSmooth) {
+                            categoryFilter = (categoryFilter == cat) ? nil : cat
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: cat.icon)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(categoryFilter == cat ? .white : cat.primaryColor)
+                            Text(cat.label).font(.system(size: 12, weight: categoryFilter == cat ? .bold : .medium))
+                        }
+                        .foregroundStyle(categoryFilter == cat ? .white : DesignTokens.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(categoryFilter == cat ? cat.primaryColor.opacity(0.3) : Color.white.opacity(0.05))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
     
     // MARK: - List Content
     
+    // MARK: Group Mode Picker
+    
+    private var groupModePicker: some View {
+        Picker(String(localized: "Group by"), selection: $groupMode) {
+            ForEach(GroupMode.allCases, id: \.self) { mode in
+                Text(String(localized: "\(mode.rawValue)")).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .onChange(of: groupMode) {
+            HapticService.shared.snoozeTimeSelected()
+        }
+        .nudgeAccessibility(
+            label: String(localized: "Group items by"),
+            hint: String(localized: "Switch between status and category grouping")
+        )
+    }
+    
+    // MARK: Category Grouped List
+    
+    private var categoryGroupedList: some View {
+        let allItems = activeItems + snoozedItems
+        // Build category → items mapping
+        let grouped: [(category: TaskCategory, items: [NudgeItem])] = {
+            var dict: [TaskCategory: [NudgeItem]] = [:]
+            for item in allItems {
+                dict[item.resolvedCategory, default: []].append(item)
+            }
+            return dict
+                .sorted { $0.value.count > $1.value.count }
+                .map { (category: $0.key, items: $0.value) }
+        }()
+        
+        return List {
+            ForEach(grouped, id: \.category) { group in
+                Section {
+                    ForEach(group.items, id: \.id) { item in
+                        ItemRowView(item: item) {
+                            editingItem = item
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .swipeActions(edge: .trailing) {
+                            if item.status != .done {
+                                Button {
+                                    markDoneWithUndo(item)
+                                } label: {
+                                    Label(String(localized: "Done"), systemImage: "checkmark")
+                                }
+                                .tint(DesignTokens.accentComplete)
+                            }
+                        }
+                        .swipeActions(edge: .leading) {
+                            if item.status == .active {
+                                Button {
+                                    showSnoozeFor = item
+                                } label: {
+                                    Label(String(localized: "Snooze"), systemImage: "clock")
+                                }
+                                .tint(DesignTokens.accentStale)
+                            }
+                        }
+                        .contextMenu { contextMenu(for: item) }
+                    }
+                } header: {
+                    HStack(spacing: DesignTokens.spacingXS) {
+                        Image(systemName: group.category.icon)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(group.category.primaryColor)
+                        Text(group.category.label)
+                            .font(AppTheme.headline)
+                            .foregroundStyle(DesignTokens.textPrimary)
+                        Text("\(group.items.count)")
+                            .font(AppTheme.caption.weight(.semibold))
+                            .foregroundStyle(group.category.primaryColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(group.category.primaryColor.opacity(0.15))
+                            )
+                        Spacer()
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(group.category.label), \(group.items.count) \(group.items.count == 1 ? String(localized: "item") : String(localized: "items"))")
+                    .padding(.vertical, DesignTokens.spacingSM)
+                    .padding(.horizontal, DesignTokens.spacingXS)
+                    .background(
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .ignoresSafeArea()
+                    )
+                }
+            }
+            
+            // Done today section at the bottom
+            let filteredDone = filtered(doneItems)
+            if !filteredDone.isEmpty {
+                Section {
+                    ForEach(filteredDone, id: \.id) { item in
+                        ItemRowView(item: item) {
+                            editingItem = item
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .contextMenu { contextMenu(for: item) }
+                    }
+                } header: {
+                    sectionHeader(
+                        title: String(localized: "Done Today"),
+                        count: filteredDone.count,
+                        color: DesignTokens.accentComplete
+                    )
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .refreshable { refreshData() }
+    }
+    
     private var listContent: some View {
         List {
             // Up Next section
-            if !activeItems.isEmpty {
+            let filteredActive = filtered(activeItems)
+            if !filteredActive.isEmpty {
                 Section {
-                    ForEach(activeItems, id: \.id) { item in
+                    ForEach(filteredActive, id: \.id) { item in
                         ItemRowView(item: item) {
                             editingItem = item
                         }
@@ -119,16 +355,17 @@ struct AllItemsView: View {
                 } header: {
                     sectionHeader(
                         title: String(localized: "Up Next"),
-                        count: activeItems.count,
+                        count: filteredActive.count,
                         color: DesignTokens.accentActive
                     )
                 }
             }
             
             // Snoozed section
-            if !snoozedItems.isEmpty {
+            let filteredSnoozed = filtered(snoozedItems)
+            if !filteredSnoozed.isEmpty {
                 Section {
-                    ForEach(snoozedItems, id: \.id) { item in
+                    ForEach(filteredSnoozed, id: \.id) { item in
                         ItemRowView(item: item) {
                             editingItem = item
                         }
@@ -140,16 +377,17 @@ struct AllItemsView: View {
                 } header: {
                     sectionHeader(
                         title: String(localized: "Snoozed"),
-                        count: snoozedItems.count,
+                        count: filteredSnoozed.count,
                         color: DesignTokens.textSecondary
                     )
                 }
             }
             
             // Done Today section
-            if !doneItems.isEmpty {
+            let filteredDone = filtered(doneItems)
+            if !filteredDone.isEmpty {
                 Section {
-                    ForEach(doneItems, id: \.id) { item in
+                    ForEach(filteredDone, id: \.id) { item in
                         ItemRowView(item: item) {
                             editingItem = item
                         }
@@ -161,7 +399,7 @@ struct AllItemsView: View {
                 } header: {
                     sectionHeader(
                         title: String(localized: "Done Today"),
-                        count: doneItems.count,
+                        count: filteredDone.count,
                         color: DesignTokens.accentComplete
                     )
                 }
@@ -242,8 +480,8 @@ struct AllItemsView: View {
         Divider()
         
         Button(role: .destructive) {
-            repository?.delete(item)
-            refreshData()
+            itemToDelete = item
+            showDeleteConfirmation = true
         } label: {
             Label(String(localized: "Delete"), systemImage: "trash")
         }
@@ -323,8 +561,8 @@ struct AllItemsView: View {
         undoPreviousSortOrder = item.sortOrder
         
         repository?.markDone(item)
-        HapticService.shared.swipeDone()
-        
+        HapticService.shared.completionHaptic(for: item.resolvedCategory)
+
         // Show undo toast
         undoItem = item
         undoTimerTask?.cancel()
@@ -421,40 +659,54 @@ struct ItemEditSheet: View {
     
     @Environment(\.dismiss) private var dismiss
     @State private var editedContent: String = ""
+    @State private var selectedCategory: TaskCategory? = nil
     
     var body: some View {
         NavigationStack {
             ZStack {
                 DesignTokens.canvas.ignoresSafeArea()
                 
-                VStack(spacing: DesignTokens.spacingLG) {
-                    // Content editor
-                    TextField(String(localized: "Task"), text: $editedContent, axis: .vertical)
-                        .font(AppTheme.body)
-                        .foregroundStyle(DesignTokens.textPrimary)
-                        .padding(DesignTokens.spacingLG)
-                        .background(
-                            RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard)
-                                .fill(Color.white.opacity(0.05))
-                        )
-                        .lineLimit(1...5)
-                    
-                    // Metadata
-                    VStack(alignment: .leading, spacing: DesignTokens.spacingSM) {
-                        Label(item.sourceType.label, systemImage: item.sourceType.icon)
-                        Label(item.createdAt.relativeDescription, systemImage: "clock")
-                        if let action = item.actionType {
-                            Label(action.label, systemImage: action.icon)
+                ScrollView {
+                    VStack(spacing: DesignTokens.spacingLG) {
+                        // Content editor
+                        TextField(String(localized: "Task"), text: $editedContent, axis: .vertical)
+                            .font(AppTheme.body)
+                            .foregroundStyle(DesignTokens.textPrimary)
+                            .padding(DesignTokens.spacingLG)
+                            .background(
+                                RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard)
+                                    .fill(Color.white.opacity(0.05))
+                            )
+                            .lineLimit(1...5)
+                            .submitLabel(.done)
+                        
+                        // Category picker
+                        VStack(alignment: .leading, spacing: DesignTokens.spacingSM) {
+                            Text(String(localized: "Category"))
+                                .font(AppTheme.footnote.weight(.semibold))
+                                .foregroundStyle(DesignTokens.textSecondary)
+                            
+                            TaskCategoryPicker(selectedCategory: $selectedCategory)
                         }
+                        
+                        // Metadata
+                        VStack(alignment: .leading, spacing: DesignTokens.spacingSM) {
+                            Label(item.sourceType.label, systemImage: item.sourceType.icon)
+                            Label(item.createdAt.relativeDescription, systemImage: "clock")
+                            if let action = item.actionType {
+                                Label(action.label, systemImage: action.icon)
+                            }
+                        }
+                        .font(AppTheme.caption)
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        Spacer(minLength: DesignTokens.spacingXXXL)
                     }
-                    .font(AppTheme.caption)
-                    .foregroundStyle(DesignTokens.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Spacer()
+                    .padding(DesignTokens.spacingXL)
                 }
-                .padding(DesignTokens.spacingXL)
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(String(localized: "Edit"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -464,6 +716,10 @@ struct ItemEditSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(String(localized: "Save")) {
                         item.content = editedContent
+                        if let cat = selectedCategory {
+                            item.category = cat
+                        }
+                        item.updatedAt = Date()
                         onSave()
                         dismiss()
                     }
@@ -473,6 +729,7 @@ struct ItemEditSheet: View {
         }
         .onAppear {
             editedContent = item.content
+            selectedCategory = item.category
         }
         .preferredColorScheme(.dark)
     }

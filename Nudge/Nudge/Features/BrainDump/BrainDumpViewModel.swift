@@ -12,13 +12,14 @@
 import SwiftUI
 import SwiftData
 import TipKit
+import os
 
 @Observable
 final class BrainDumpViewModel {
     
     // MARK: - State
     
-    enum Phase {
+    enum Phase: Equatable {
         case idle
         case recording
         case processing
@@ -60,6 +61,7 @@ final class BrainDumpViewModel {
         var contactName: String?
         var priority: TaskPriority
         var dueDate: Date?
+        var category: TaskCategory?
         var isIncluded: Bool = true
     }
     
@@ -125,8 +127,9 @@ final class BrainDumpViewModel {
     func processTypedInput(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        guard phase.tag != "processing" else { return }
         
-        print("🎤 [BrainDump] Processing typed input (\(trimmed.count) chars): \"\(trimmed.prefix(100))...\"")
+        Log.ui.debug("[BrainDump] Processing typed input (\(trimmed.count) chars): \"\(trimmed.prefix(100))...\"")
         phase = .processing
         Task {
             await processTranscript(trimmed)
@@ -152,14 +155,17 @@ final class BrainDumpViewModel {
         }
         
         editableTasks = extractedTasks.map { task in
-            EditableTask(
+            let mappedAction = task.mappedActionType
+            let inferredCategory = CategoryClassifier.classify(content: task.content, actionType: mappedAction)
+            return EditableTask(
                 content: task.content,
                 emoji: task.emoji.isEmpty ? nil : task.emoji,
-                actionType: task.mappedActionType,
+                actionType: mappedAction,
                 actionTarget: task.actionTarget.isEmpty ? nil : task.actionTarget,
                 contactName: task.contactName.isEmpty ? nil : task.contactName,
                 priority: task.mappedPriority,
-                dueDate: task.parsedDueDate
+                dueDate: task.parsedDueDate,
+                category: inferredCategory
             )
         }
         
@@ -207,6 +213,7 @@ final class BrainDumpViewModel {
                 contactName: task.contactName,
                 priority: task.priority,
                 dueDate: task.dueDate,
+                category: task.category,
                 brainDump: dump
             )
             
@@ -222,7 +229,7 @@ final class BrainDumpViewModel {
                     if let target, !target.isEmpty {
                         item.actionTarget = target
                         if let resolvedName { item.contactName = resolvedName }
-                        try? modelContext.save()
+                        do { try modelContext.save() } catch { Log.data.error("[BrainDump] Contact resolve save failed: \(error, privacy: .public)") }
                     }
                 }
             }
@@ -233,7 +240,9 @@ final class BrainDumpViewModel {
             // Notify NudgesView to refresh — without this, new tasks don't appear
             NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
         } catch {
-            print("❌ Failed to save brain dump tasks: \(error)")
+            Log.data.error("Failed to save brain dump tasks: \(error, privacy: .public)")
+            phase = .error(String(localized: "Couldn't save your tasks. Please try again."))
+            return
         }
         
         // Record usage for free tier

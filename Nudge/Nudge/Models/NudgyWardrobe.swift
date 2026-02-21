@@ -3,7 +3,7 @@
 //  Nudge
 //
 //  SwiftData model for tracking unlocked and equipped accessories.
-//  Also tracks snowflakes (reward currency), streaks, and level.
+//  Also tracks fish (reward currency), streaks, and level.
 //
 //  One instance per user (singleton-style, fetched with a descriptor).
 //  Created automatically on first app launch by RewardService.
@@ -19,23 +19,23 @@ final class NudgyWardrobe {
     
     // MARK: Identity
     
-    var id: UUID
+    var id: UUID = UUID()
     
     // MARK: Reward Currency
     
-    /// Snowflakes — earned by completing tasks, spent on accessories.
-    var snowflakes: Int
+    /// Fish — earned by completing tasks, spent on accessories.
+    var fish: Int = 0
     
-    /// Total snowflakes earned all-time (never decremented — for level calculation).
-    var lifetimeSnowflakes: Int
+    /// Total fish earned all-time (never decremented — for level calculation).
+    var lifetimeFish: Int = 0
     
     // MARK: Streaks
     
     /// Current consecutive-day streak.
-    var currentStreak: Int
+    var currentStreak: Int = 0
     
     /// Longest streak ever achieved.
-    var longestStreak: Int
+    var longestStreak: Int = 0
     
     /// The last date a task was completed (for streak calculation).
     var lastCompletionDateRaw: Date?
@@ -44,36 +44,36 @@ final class NudgyWardrobe {
     
     /// Comma-separated IDs of unlocked accessories (SwiftData-safe string storage).
     /// e.g. "scarf-blue,beanie-red,sunglasses"
-    var unlockedAccessoriesRaw: String
+    var unlockedAccessoriesRaw: String = ""
     
     // MARK: Equipped Accessories
     
     /// Comma-separated IDs of currently equipped accessories.
     /// Max one per slot enforced by RewardService.
-    var equippedAccessoriesRaw: String
+    var equippedAccessoriesRaw: String = ""
     
     // MARK: Unlocked Props
     
     /// Comma-separated IDs of environment props unlocked.
     /// e.g. "igloo,campfire"
-    var unlockedPropsRaw: String
+    var unlockedPropsRaw: String = ""
     
     // MARK: Tank Decorations
     
     /// Comma-separated IDs of unlocked tank decorations.
     /// e.g. "deco-coral,deco-shell"
-    var unlockedDecorationsRaw: String
+    var unlockedDecorationsRaw: String = ""
     
     /// Comma-separated IDs of currently placed (visible) tank decorations.
-    var placedDecorationsRaw: String
+    var placedDecorationsRaw: String = ""
     
     // MARK: Stats
     
     /// Total tasks completed all-time.
-    var totalTasksCompleted: Int
+    var totalTasksCompleted: Int = 0
     
     /// Tasks completed today (reset daily).
-    var tasksCompletedToday: Int
+    var tasksCompletedToday: Int = 0
     
     /// Date of last daily reset.
     var lastDailyResetRaw: Date?
@@ -81,10 +81,10 @@ final class NudgyWardrobe {
     // MARK: Streak Freeze
     
     /// Number of streak freezes available (earned from weekly all-clear)
-    var streakFreezes: Int
+    var streakFreezes: Int = 0
     
     /// Whether a freeze was used today (prevents double-use)
-    var freezeUsedToday: Bool
+    var freezeUsedToday: Bool = false
     
     /// Last date a weekly freeze was earned
     var lastFreezeEarnedDate: Date?
@@ -92,26 +92,32 @@ final class NudgyWardrobe {
     // MARK: Feeding
     
     /// Number of times fish were fed today.
-    var fishFedToday: Int
+    var fishFedToday: Int = 0
     
     /// Last date fish were fed (for daily reset).
     var lastFedDateRaw: Date?
     
     /// Consecutive days the user has fed fish (feeding streak).
-    var feedingStreak: Int
+    var feedingStreak: Int = 0
     
     /// Longest feeding streak ever.
-    var longestFeedingStreak: Int
+    var longestFeedingStreak: Int = 0
     
     // MARK: Milestones
     
     /// Comma-separated milestone IDs already celebrated (e.g. "10,25,50,100")
-    var celebratedMilestonesRaw: String
+    var celebratedMilestonesRaw: String = ""
     
     // MARK: Fish Economy
     
     /// JSON-encoded array of FishCatch records.
-    var fishCatchesJSON: String
+    var fishCatchesJSON: String = ""
+
+    /// JSON-encoded [String: Int] mapping species rawValue → total catch count.
+    var catchCountsJSON: String = ""
+
+    /// Comma-separated "species:stageRaw" pairs already celebrated (e.g. "catfish:2,tropical:3").
+    var celebratedEvolutionsRaw: String = ""
     
     /// Decoded fish catches (computed, not stored).
     var fishCatches: [FishCatch] {
@@ -131,6 +137,45 @@ final class NudgyWardrobe {
         }
     }
     
+    /// Per-species total catch counts (decoded from JSON).
+    var catchCounts: [String: Int] {
+        get {
+            guard !catchCountsJSON.isEmpty,
+                  let data = catchCountsJSON.data(using: .utf8),
+                  let dict = try? JSONDecoder().decode([String: Int].self, from: data) else {
+                return [:]
+            }
+            return dict
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue),
+               let json = String(data: data, encoding: .utf8) {
+                catchCountsJSON = json
+            }
+        }
+    }
+
+    /// Set of "species:stageRaw" strings that have already been celebrated.
+    var celebratedEvolutions: Set<String> {
+        get {
+            Set(celebratedEvolutionsRaw.split(separator: ",").map(String.init))
+                .filter { !$0.isEmpty }
+        }
+        set {
+            celebratedEvolutionsRaw = newValue.sorted().joined(separator: ",")
+        }
+    }
+
+    /// Increment catch count for a species and return the new total.
+    @discardableResult
+    func incrementCatchCount(for species: FishSpecies) -> Int {
+        var counts = catchCounts
+        let newCount = (counts[species.rawValue] ?? 0) + 1
+        counts[species.rawValue] = newCount
+        catchCounts = counts
+        return newCount
+    }
+
     /// Record a new fish catch.
     func addFishCatch(_ catch_: FishCatch) {
         var current = fishCatches
@@ -146,8 +191,8 @@ final class NudgyWardrobe {
     
     init() {
         self.id = UUID()
-        self.snowflakes = 0
-        self.lifetimeSnowflakes = 0
+        self.fish = 0
+        self.lifetimeFish = 0
         self.currentStreak = 0
         self.longestStreak = 0
         self.lastCompletionDateRaw = nil
@@ -168,6 +213,8 @@ final class NudgyWardrobe {
         self.longestFeedingStreak = 0
         self.celebratedMilestonesRaw = ""
         self.fishCatchesJSON = ""
+        self.catchCountsJSON = ""
+        self.celebratedEvolutionsRaw = ""
     }
     
     // MARK: - Computed Properties
@@ -242,21 +289,21 @@ final class NudgyWardrobe {
         streakFreezes > 0 && !freezeUsedToday
     }
     
-    /// Current level based on lifetime snowflakes.
+    /// Current level based on lifetime fish earned.
     var level: Int {
         // Level thresholds: 0, 10, 30, 60, 100, 150, 210, 280, 360, 450...
-        // Formula: level n requires n*(n+1)/2 * 10 snowflakes
+        // Formula: level n requires n*(n+1)/2 * 10 fish
         var lvl = 0
         var threshold = 0
-        while threshold <= lifetimeSnowflakes {
+        while threshold <= lifetimeFish {
             lvl += 1
             threshold += lvl * 10
         }
         return max(1, lvl)
     }
     
-    /// Snowflakes needed for the next level.
-    var snowflakesForNextLevel: Int {
+    /// Fish needed for the next level.
+    var fishForNextLevel: Int {
         var threshold = 0
         for n in 1...(level + 1) {
             threshold += n * 10
@@ -273,10 +320,10 @@ final class NudgyWardrobe {
             }
             return t
         }()
-        let nextLevelThreshold = snowflakesForNextLevel
+        let nextLevelThreshold = fishForNextLevel
         let range = nextLevelThreshold - currentLevelThreshold
         guard range > 0 else { return 0 }
-        let progress = lifetimeSnowflakes - currentLevelThreshold
+        let progress = lifetimeFish - currentLevelThreshold
         return min(1.0, max(0, Double(progress) / Double(range)))
     }
     

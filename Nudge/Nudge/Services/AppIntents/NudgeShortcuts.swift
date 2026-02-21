@@ -76,11 +76,35 @@ struct NudgeShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: OpenNudgeIntent(),
             phrases: [
-                "Brain dump in \(.applicationName)",
+                "Unload in \(.applicationName)",
                 "Open \(.applicationName)"
             ],
             shortTitle: "Open Nudge",
             systemImageName: "brain.head.profile"
+        )
+        
+        // ─── Get Tasks By Category ───
+        AppShortcut(
+            intent: GetTasksByCategoryIntent(),
+            phrases: [
+                "Show my \(\.$category) nudges in \(.applicationName)",
+                "How many \(\.$category) tasks in \(.applicationName)",
+                "\(\.$category) nudges in \(.applicationName)"
+            ],
+            shortTitle: "Category Nudges",
+            systemImageName: "tag.fill"
+        )
+        
+        // ─── Snooze a Task ───
+        AppShortcut(
+            intent: SnoozeTaskIntent(),
+            phrases: [
+                "Snooze a nudge in \(.applicationName)",
+                "Snooze task in \(.applicationName)",
+                "Remind me later in \(.applicationName)"
+            ],
+            shortTitle: "Snooze Nudge",
+            systemImageName: "clock.badge.checkmark.fill"
         )
     }
 }

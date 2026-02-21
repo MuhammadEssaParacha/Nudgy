@@ -89,13 +89,13 @@ struct StepIconView: View {
 
 // MARK: - Resolver
 
-nonisolated enum TaskIconResolver {
+@MainActor enum TaskIconResolver {
     
     /// Resolve emoji + actionType to an SF Symbol name and color.
     static func resolve(
         emoji: String?,
         actionType: ActionType? = nil,
-        fallbackColor: Color = DesignTokens.accentActive
+        fallbackColor: Color? = nil
     ) -> (symbol: String, color: Color) {
         // 1. Try emoji mapping
         if let emoji, let mapped = emojiToSymbol[emoji] {
@@ -108,7 +108,7 @@ nonisolated enum TaskIconResolver {
         }
         
         // 3. Fallback
-        return ("checklist", fallbackColor)
+        return ("checklist", fallbackColor ?? DesignTokens.accentActive)
     }
     
     /// Just the symbol name for inline use
@@ -227,6 +227,7 @@ nonisolated enum TaskIconResolver {
         case .search:        return Color(hex: "60A5FA")
         case .navigate:      return Color(hex: "60A5FA")
         case .addToCalendar: return Color(hex: "F59E0B")
+        case .setAlarm:      return Color(hex: "F59E0B")
         }
     }
 }

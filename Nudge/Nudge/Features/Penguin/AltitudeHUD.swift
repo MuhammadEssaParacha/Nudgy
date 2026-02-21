@@ -3,7 +3,7 @@
 //  Nudge
 //
 //  Gamification stats overlay — sits on top of the Antarctic scene.
-//  Shows: altitude (level), fish count (snowflakes), streak flame,
+//  Shows: altitude (level), fish count, streak flame,
 //  and level progress arc.
 //
 //  Inspired by the hand-drawn sketch: top bar with altitude, level,
@@ -107,7 +107,7 @@ struct AltitudeHUD: View {
     private var fishBadge: some View {
         ZStack {
             HStack(spacing: 4) {
-                // Fish icon (replaces snowflake theming)
+                // Fish icon (currency)
                 Image(systemName: "fish.fill")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(

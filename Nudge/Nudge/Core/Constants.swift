@@ -50,7 +50,7 @@ enum DesignTokens {
     
     // MARK: Fish Economy Colors
     
-    /// Gold — snowflakes, currency, challenge rewards
+    /// Gold — fish currency, challenge rewards
     static let goldCurrency = Color(hex: "FFD700")
     
     /// Streak gradient start
@@ -59,8 +59,8 @@ enum DesignTokens {
     /// Streak gradient end
     static let streakDeep = Color(hex: "FF6B00")
     
-    /// Snowflake / ice tint
-    static let snowflakeTint = Color(hex: "B3E5FC")
+    /// Fish currency tint (warm gold)
+    static let fishTint = Color(hex: "FFB800")
     
     /// Rare species — tropical fish
     static let speciesTropical = Color(hex: "4DD0E1")
@@ -159,5 +159,18 @@ extension Color {
             blue: Double(b) / 255,
             opacity: Double(a) / 255
         )
+    }
+}
+
+// MARK: - UIScreen Helper
+
+/// Safe replacement for deprecated `UIScreen.main` (deprecated iOS 26.0).
+/// Must be called from a `@MainActor` context.
+@MainActor
+extension UIScreen {
+    static var current: UIScreen {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.screen }
+            .first ?? UIScreen.init()
     }
 }

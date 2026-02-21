@@ -102,7 +102,8 @@ struct ActiveTaskBubble: View {
                     }
                     onDone()
                     // Reset flash after animation
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(0.5))
                         doneFlash = false
                     }
                 } label: {
@@ -155,8 +156,9 @@ struct ActiveTaskBubble: View {
 
     private var allClearCard: some View {
         HStack(spacing: 8) {
-            Text("🐧")
-                .font(.system(size: 20))
+            Image(systemName: "pawprint.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(DesignTokens.accentComplete)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(String(localized: "Nothing right now"))

@@ -133,7 +133,8 @@ struct MemojiCaptureField: UIViewRepresentable {
         context.coordinator.textView = textView
         
         // Auto-show keyboard after a brief delay (sheet animation)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.5))
             textView.becomeFirstResponder()
         }
         
@@ -191,7 +192,8 @@ struct MemojiCaptureField: UIViewRepresentable {
             
             // Clear the text view after capture so it's ready for another pick
             if found {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(0.1))
                     textView.attributedText = NSAttributedString(string: "")
                 }
             }

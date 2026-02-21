@@ -377,8 +377,8 @@ final class PenguinState {
     // MARK: - Smart Reactions (AI-powered)
     
     /// React to a task being completed — delegates to NudgyEngine.
-    func reactToCompletion(taskContent: String? = nil, remainingCount: Int = 0) {
-        NudgyEngine.shared.reactToCompletion(taskContent: taskContent, remainingCount: remainingCount)
+    func reactToCompletion(taskContent: String? = nil, remainingCount: Int = 0, categoryLabel: String? = nil) {
+        NudgyEngine.shared.reactToCompletion(taskContent: taskContent, remainingCount: remainingCount, categoryLabel: categoryLabel)
     }
     
     /// React to a task being snoozed — delegates to NudgyEngine.
@@ -394,13 +394,15 @@ final class PenguinState {
     // MARK: - Smart Greeting
     
     /// Greet the user — delegates to NudgyEngine.
-    func smartGreet(userName: String?, activeTaskCount: Int, overdueCount: Int = 0, staleCount: Int = 0, doneToday: Int = 0) {
+    func smartGreet(userName: String?, activeTaskCount: Int, overdueCount: Int = 0, staleCount: Int = 0, doneToday: Int = 0, topCategory: (label: String, emoji: String, count: Int)? = nil, categoryContext: CategoryNudgeContext? = nil) {
         NudgyEngine.shared.greet(
             userName: userName,
             activeTaskCount: activeTaskCount,
             overdueCount: overdueCount,
             staleCount: staleCount,
-            doneToday: doneToday
+            doneToday: doneToday,
+            topCategory: topCategory,
+            categoryContext: categoryContext
         )
     }
     

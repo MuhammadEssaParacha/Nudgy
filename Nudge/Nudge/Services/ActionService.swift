@@ -153,6 +153,17 @@ enum ActionService {
                     "itemID": item.id.uuidString
                 ]
             )
+        case .setAlarm:
+            // Post notification for alarm picker presentation
+            NotificationCenter.default.post(
+                name: .nudgeSetAlarm,
+                object: nil,
+                userInfo: [
+                    "content": item.content,
+                    "itemID": item.id.uuidString,
+                    "dueDate": (item.dueDate ?? item.scheduledTime) as Any
+                ]
+            )
         }
     }
     
@@ -207,6 +218,9 @@ extension Notification.Name {
     /// Posted when a task should be added to the calendar
     static let nudgeAddToCalendar = Notification.Name("nudgeAddToCalendar")
     
+    /// Posted when an alarm should be set for a task
+    static let nudgeSetAlarm = Notification.Name("nudgeSetAlarm")
+    
     /// Posted when Nudgy wants to execute an action from chat (draft → send)
     static let nudgeChatExecuteAction = Notification.Name("nudgeChatExecuteAction")
     
@@ -221,6 +235,10 @@ extension Notification.Name {
     
     /// Posted to switch to the Nudges tab (e.g. after task creation)
     static let nudgeSwitchToNudges = Notification.Name("nudgeSwitchToNudges")
+
+    /// Posted when a fish species evolves to a new stage.
+    /// `object` is a `(species: FishSpecies, stage: FishEvolutionStage)` tuple.
+    static let nudgeFishEvolved = Notification.Name("nudgeFishEvolved")
 }
 
 // MARK: - Message Compose View (UIViewControllerRepresentable)

@@ -48,6 +48,7 @@ struct ParalysisPromptView: View {
                         .foregroundStyle(DesignTokens.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .nudgeAccessibility(label: String(localized: "Dismiss"), hint: nil, traits: .isButton)
             }
             
             // Action buttons
@@ -77,9 +78,10 @@ struct ParalysisPromptView: View {
                     onBrainDump()
                 } label: {
                     HStack(spacing: DesignTokens.spacingSM) {
-                        Text("🧠")
-                            .font(AppTheme.footnote)
-                        Text(String(localized: "Brain Dump"))
+                        Image(systemName: "brain.head.profile.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                        Text(String(localized: "Unload"))
                             .font(AppTheme.footnote.weight(.semibold))
                     }
                     .foregroundStyle(DesignTokens.textPrimary)
@@ -101,7 +103,7 @@ struct ParalysisPromptView: View {
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusCard))
         .transition(.opacity.combined(with: .scale(scale: 0.95)))
         .nudgeAccessibility(
-            label: String(localized: "You've skipped \(skipCount) tasks. Would you like the easiest catch or a brain dump?"),
+            label: String(localized: "You've skipped \(skipCount) tasks. Would you like the easiest catch or an unload?"),
             hint: nil,
             traits: .isStaticText
         )

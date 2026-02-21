@@ -9,6 +9,7 @@
 
 import Foundation
 import SwiftData
+import os
 
 // MARK: - Tool Execution Result
 
@@ -44,7 +45,7 @@ final class NudgyToolExecutor {
     func execute(_ toolCall: LLMToolCall) -> ToolExecutionResult {
         let args = toolCall.parsedArguments() ?? [:]
         
-        print("🧠🔧 Executing tool: \(toolCall.functionName) id=\(toolCall.id) args=\(toolCall.arguments.prefix(120))")
+        Log.ai.debug("Executing tool: \(toolCall.functionName) id=\(toolCall.id) args=\(toolCall.arguments.prefix(120))")
         
         switch toolCall.functionName {
         case "lookup_tasks":
@@ -137,7 +138,7 @@ final class NudgyToolExecutor {
         let doneToday = grouped.doneToday
         
         let overdue = active.filter { $0.isOverdue }
-        let stale = active.filter { $0.isStale }
+        let stale = active.filter { $0.isCategoryStale }
         let oldest = active.max(by: { $0.ageInDays < $1.ageInDays })
         
         var lines: [String] = []
@@ -145,9 +146,33 @@ final class NudgyToolExecutor {
         lines.append("Snoozed: \(snoozed.count)")
         lines.append("Done today: \(doneToday.count)")
         if !overdue.isEmpty { lines.append("⚠️ Overdue: \(overdue.count)") }
-        if !stale.isEmpty { lines.append("⏰ Stale (3+ days): \(stale.count)") }
+        if !stale.isEmpty { lines.append("⏰ Stale (category-aware): \(stale.count)") }
         if let o = oldest, o.ageInDays > 0 {
             lines.append("Oldest active: \"\(o.content)\" (\(o.ageInDays) days)")
+        }
+        
+        // Category breakdown of active tasks
+        var activeByCat: [String: Int] = [:]
+        for item in active {
+            let label = item.resolvedCategory.label
+            activeByCat[label, default: 0] += 1
+        }
+        if !activeByCat.isEmpty {
+            let sorted = activeByCat.sorted { $0.value > $1.value }
+            let catList = sorted.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
+            lines.append("Active by category: \(catList)")
+        }
+        
+        // Category breakdown of done today
+        var doneByCat: [String: Int] = [:]
+        for item in doneToday {
+            let label = item.resolvedCategory.label
+            doneByCat[label, default: 0] += 1
+        }
+        if !doneByCat.isEmpty {
+            let sorted = doneByCat.sorted { $0.value > $1.value }
+            let catList = sorted.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
+            lines.append("Done today by category: \(catList)")
         }
         
         return ToolExecutionResult(
@@ -159,8 +184,7 @@ final class NudgyToolExecutor {
     
     private func executeGetCurrentTime(toolCallId: String) -> ToolExecutionResult {
         let now = Date()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
+        let timeString = now.formatted(.dateTime.weekday(.wide).month(.wide).day().year().hour().minute())
         let hour = Calendar.current.component(.hour, from: now)
         
         let period: String
@@ -173,7 +197,7 @@ final class NudgyToolExecutor {
         
         return ToolExecutionResult(
             toolCallId: toolCallId,
-            result: "\(formatter.string(from: now)). It's \(period).",
+            result: "\(timeString). It's \(period).",
             sideEffects: []
         )
     }
@@ -189,7 +213,7 @@ final class NudgyToolExecutor {
             let active = repo.fetchActiveQueue()
             if let match = active.first(where: { $0.content.lowercased().contains(taskContent.lowercased()) }) {
                 repo.markDone(match)
-                HapticService.shared.swipeDone()
+                HapticService.shared.completionHaptic(for: match.resolvedCategory)
                 return ToolExecutionResult(
                     toolCallId: toolCallId,
                     result: "Marked '\(match.content)' as done! ✅",
@@ -226,7 +250,7 @@ final class NudgyToolExecutor {
             let actionTypeRaw = args["action_type"] as? String ?? ""
             let contactName = args["contact_name"] as? String
             
-            print("🧠🔧 task_action CREATE: '\(taskContent)' emoji=\(emoji ?? "nil") priority=\(priorityRaw) due=\(dueDateRaw) action=\(actionTypeRaw) contact=\(contactName ?? "nil")")
+            Log.ai.debug("task_action CREATE: '\(taskContent)' emoji=\(emoji ?? "nil") priority=\(priorityRaw) due=\(dueDateRaw) action=\(actionTypeRaw) contact=\(contactName ?? "nil")")
             
             // Map action type
             let actionType: ActionType?
@@ -234,6 +258,7 @@ final class NudgyToolExecutor {
             case "CALL": actionType = .call
             case "TEXT": actionType = .text
             case "EMAIL": actionType = .email
+            case "ALARM": actionType = .setAlarm
             default: actionType = nil
             }
             
@@ -261,11 +286,11 @@ final class NudgyToolExecutor {
             }
             
             // Force save to ensure persistence
-            try? modelContext.save()
+            do { try modelContext.save() } catch { Log.ai.error("[ToolExecutor] Task create save failed: \(error, privacy: .public)") }
             
             HapticService.shared.cardAppear()
             
-            print("🧠✅ Task created: '\(taskContent)' — saved to SwiftData")
+            Log.ai.info("Task created: '\(taskContent)' — saved to SwiftData")
             
             // Build concise confirmation for LLM (it reads this and responds to user)
             var details = "\(emoji ?? "doc.text.fill") Created: '\(taskContent)'"
@@ -336,7 +361,7 @@ final class NudgyToolExecutor {
         let draftSubject = args["draft_subject"] as? String ?? ""
         let contactName = args["contact_name"] as? String ?? ""
         
-        print("🧠🔧 execute_action: type=\(actionTypeRaw) target=\(target) contact=\(contactName)")
+        Log.ai.debug("execute_action: type=\(actionTypeRaw) target=\(target) contact=\(contactName)")
         
         // Try to find matching task first
         let repo = NudgeRepository(modelContext: modelContext)
@@ -361,7 +386,7 @@ final class NudgyToolExecutor {
                 item.aiDraft = draftBody
                 if !draftSubject.isEmpty { item.aiDraftSubject = draftSubject }
                 item.draftGeneratedAt = Date()
-                try? modelContext.save()
+                do { try modelContext.save() } catch { Log.ai.error("[ToolExecutor] Draft save failed: \(error, privacy: .public)") }
             }
         }
         
@@ -381,6 +406,7 @@ final class NudgyToolExecutor {
         case "SEARCH": actionLabel = "Opening search for '\(target)' in the app"
         case "NAVIGATE": actionLabel = "Getting directions to \(target)"
         case "LINK": actionLabel = "Opening \(target) in the browser"
+        case "ALARM": actionLabel = "Setting alarm for \(target)"
         default: actionLabel = "Executing action"
         }
         
@@ -400,7 +426,7 @@ final class NudgyToolExecutor {
         let body = args["body"] as? String ?? ""
         let context = args["context"] as? String ?? ""
         
-        print("🧠🔧 generate_draft: type=\(draftType) to=\(recipientName) context=\(context)")
+        Log.ai.debug("generate_draft: type=\(draftType) to=\(recipientName) context=\(context)")
         
         guard !body.isEmpty else {
             return ToolExecutionResult(

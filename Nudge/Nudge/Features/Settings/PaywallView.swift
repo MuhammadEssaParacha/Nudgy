@@ -83,10 +83,16 @@ struct PaywallView: View {
                             if purchaseService.isPro { dismiss() }
                         }
                     } label: {
-                        Text(String(localized: "Restore Purchases"))
-                            .font(.system(size: 14))
-                            .foregroundStyle(DesignTokens.textTertiary)
+                        if purchaseService.isLoading {
+                            ProgressView()
+                                .tint(DesignTokens.textTertiary)
+                        } else {
+                            Text(String(localized: "Restore Purchases"))
+                                .font(.system(size: 14))
+                                .foregroundStyle(DesignTokens.textTertiary)
+                        }
                     }
+                    .disabled(purchaseService.isLoading)
                     
                     // Legal
                     VStack(spacing: 4) {
@@ -95,10 +101,14 @@ struct PaywallView: View {
                             .foregroundStyle(DesignTokens.textTertiary)
                         
                         HStack(spacing: 4) {
-                            Link(String(localized: "Terms of Service"), destination: URL(string: "https://nudge-app.com/terms")!)
+                            if let termsURL = URL(string: "https://nudge-app.com/terms") {
+                                Link(String(localized: "Terms of Service"), destination: termsURL)
+                            }
                             Text("·")
                                 .foregroundStyle(DesignTokens.textTertiary)
-                            Link(String(localized: "Privacy Policy"), destination: URL(string: "https://nudge-app.com/privacy")!)
+                            if let privacyURL = URL(string: "https://nudge-app.com/privacy") {
+                                Link(String(localized: "Privacy Policy"), destination: privacyURL)
+                            }
                         }
                         .font(.system(size: 11))
                         .foregroundStyle(DesignTokens.accentActive)

@@ -14,6 +14,7 @@
 
 import SwiftUI
 import SwiftData
+import os
 
 // MARK: - Session Phase
 
@@ -119,17 +120,8 @@ struct FocusTimerView: View {
     @State private var showCompletionParticles = false
     @State private var completionAppeared = false
     
-    // Background glow
-    @State private var glowPhase = false
-    
-    // Aurora / particles
-    @State private var auroraOffset: CGFloat = 0
-    @State private var snowflakes: [FocusSnowflake] = []
-    @State private var snowTimer: Timer?
-    
     // Ring breathing
     @State private var ringScale: CGFloat = 1.0
-    @State private var ringGlowIntensity: Double = 0.3
     
     var body: some View {
         ZStack {
@@ -175,259 +167,45 @@ struct FocusTimerView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
-            glowPhase = true
-            auroraOffset = 1
-            spawnSnowflakes()
             // Set default from AI estimate
             if let estimate = item.estimatedMinutes, estimate > 0 {
                 timer.focusMinutes = estimate
             }
         }
         .onDisappear {
+            // Record any in-progress focus time before losing the view
+            if timer.phase == .focusing || timer.phase == .paused {
+                timer.totalFocusedSeconds += timer.elapsedSeconds
+            }
+            recordFocusTime()
             tickTimer?.invalidate()
             tickTimer = nil
-            snowTimer?.invalidate()
-            snowTimer = nil
         }
     }
     
     // MARK: - Immersive Antarctic Background
     
     private var focusBackground: some View {
-        let accent = ringAccentColor
-        
-        return ZStack {
-            // Deep Antarctic night sky gradient — NOT pure black
-            LinearGradient(
-                colors: [
-                    Color(hex: "020B1A"),  // Very dark navy (not pure black)
-                    Color(hex: "0A1628"),  // Dark blue-gray
-                    Color(hex: "0E1F3D"),  // Midnight blue
-                    Color(hex: "0A1628"),
-                    Color(hex: "050E1E"),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            
-            // Stars — tiny dots scattered
-            starsLayer
-            
-            // Aurora borealis band — the hero visual
-            auroraLayer(accent: accent)
-            
-            // Central accent glow (follows ring color)
-            RadialGradient(
-                colors: [
-                    accent.opacity(glowPhase ? 0.15 : 0.06),
-                    accent.opacity(0.04),
-                    .clear
-                ],
-                center: .center,
-                startRadius: 20,
-                endRadius: 300
-            )
-            .animation(
-                reduceMotion ? nil : .easeInOut(duration: 4).repeatForever(autoreverses: true),
-                value: glowPhase
-            )
-            
-            // Floating snowflake particles
-            snowflakeLayer
-            
-            // Horizon mountain silhouette
-            mountainSilhouette
-        }
-    }
-    
-    // MARK: - Stars Layer
-    
-    private var starsLayer: some View {
-        Canvas { context, size in
-            // Deterministic star field
-            var rng = StableRNG(seed: 42)
-            for _ in 0..<80 {
-                let x = CGFloat(rng.next()) * size.width
-                let y = CGFloat(rng.next()) * size.height * 0.6 // Stars in top 60%
-                let brightness = CGFloat(rng.next()) * 0.5 + 0.15
-                let starSize = CGFloat(rng.next()) * 1.8 + 0.5
-                
-                context.fill(
-                    Path(ellipseIn: CGRect(x: x, y: y, width: starSize, height: starSize)),
-                    with: .color(.white.opacity(brightness))
+        GeometryReader { geo in
+            ZStack {
+                AntarcticEnvironment(
+                    mood: RewardService.shared.environmentMood,
+                    unlockedProps: RewardService.shared.unlockedProps,
+                    fishCount: RewardService.shared.fish,
+                    level: RewardService.shared.level,
+                    stage: StageTier.from(level: RewardService.shared.level),
+                    sceneWidth: geo.size.width,
+                    sceneHeight: geo.size.height,
+                    isActive: timer.isActive || timer.phase == .setup,
+                    timeOverride: .night
                 )
+                // Frosted veil — scene stays atmospheric without competing
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .environment(\.colorScheme, .dark)
             }
         }
-        .allowsHitTesting(false)
-    }
-    
-    // MARK: - Aurora Layer
-    
-    private func auroraLayer(accent: Color) -> some View {
-        ZStack {
-            // Primary aurora band
-            Ellipse()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            accent.opacity(0.0),
-                            accent.opacity(0.12),
-                            Color(hex: "00FFAA").opacity(0.08),
-                            DesignTokens.accentFocus.opacity(0.10),
-                            accent.opacity(0.0),
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: 600, height: 120)
-                .blur(radius: 40)
-                .offset(x: auroraOffset * 30, y: -180)
-                .animation(
-                    reduceMotion ? nil : .easeInOut(duration: 8).repeatForever(autoreverses: true),
-                    value: auroraOffset
-                )
-            
-            // Secondary shimmer band
-            Ellipse()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            .clear,
-                            Color(hex: "4FFFCF").opacity(0.06),
-                            DesignTokens.accentFocus.opacity(0.08),
-                            .clear,
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: 500, height: 80)
-                .blur(radius: 30)
-                .offset(x: -auroraOffset * 20, y: -140)
-                .animation(
-                    reduceMotion ? nil : .easeInOut(duration: 6).repeatForever(autoreverses: true),
-                    value: auroraOffset
-                )
-        }
-    }
-    
-    // MARK: - Snowflake Layer
-    
-    private var snowflakeLayer: some View {
-        SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
-            Canvas { context, size in
-                let now = timeline.date.timeIntervalSinceReferenceDate
-                for flake in snowflakes {
-                    let age = now - flake.spawnTime
-                    let yTravel = age * Double(flake.speed)
-                    let y = flake.startY + CGFloat(yTravel)
-                    let x = flake.startX + sin(CGFloat(age) * flake.wobbleFreq) * flake.wobbleAmp
-                    
-                    guard y < size.height + 20 else { continue }
-                    
-                    let opacity = min(1, age / 0.5) * Double(flake.opacity) // fade in
-                    let rect = CGRect(x: x, y: y, width: flake.size, height: flake.size)
-                    context.fill(
-                        Path(ellipseIn: rect),
-                        with: .color(.white.opacity(opacity))
-                    )
-                }
-            }
-        }
-        .allowsHitTesting(false)
-    }
-    
-    // MARK: - Mountain Silhouette
-    
-    private var mountainSilhouette: some View {
-        VStack {
-            Spacer()
-            Canvas { context, size in
-                var path = Path()
-                let w = size.width
-                let h = size.height
-                
-                path.move(to: CGPoint(x: 0, y: h))
-                path.addLine(to: CGPoint(x: 0, y: h * 0.4))
-                path.addQuadCurve(
-                    to: CGPoint(x: w * 0.15, y: h * 0.2),
-                    control: CGPoint(x: w * 0.08, y: h * 0.25)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: w * 0.3, y: h * 0.35),
-                    control: CGPoint(x: w * 0.22, y: h * 0.15)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: w * 0.5, y: h * 0.15),
-                    control: CGPoint(x: w * 0.38, y: h * 0.3)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: w * 0.7, y: h * 0.3),
-                    control: CGPoint(x: w * 0.62, y: h * 0.1)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: w * 0.85, y: h * 0.25),
-                    control: CGPoint(x: w * 0.78, y: h * 0.35)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: w, y: h * 0.4),
-                    control: CGPoint(x: w * 0.95, y: h * 0.15)
-                )
-                path.addLine(to: CGPoint(x: w, y: h))
-                path.closeSubpath()
-                
-                context.fill(path, with: .color(Color(hex: "060F20").opacity(0.9)))
-            }
-            .frame(height: 160)
-        }
-        .allowsHitTesting(false)
-    }
-    
-    // MARK: - Snowflake Spawner
-    
-    private func spawnSnowflakes() {
-        // Initial batch
-        let now = Date.timeIntervalSinceReferenceDate
-        snowflakes = (0..<30).map { _ in
-            FocusSnowflake(
-                startX: CGFloat.random(in: 0...UIScreen.main.bounds.width),
-                startY: CGFloat.random(in: -50...UIScreen.main.bounds.height),
-                speed: CGFloat.random(in: 8...25),
-                size: CGFloat.random(in: 1.5...4),
-                opacity: CGFloat.random(in: 0.15...0.5),
-                wobbleFreq: CGFloat.random(in: 0.3...1.2),
-                wobbleAmp: CGFloat.random(in: 3...12),
-                spawnTime: now - Double.random(in: 0...15)
-            )
-        }
-        
-        // Continuous spawning
-        snowTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { _ in
-            Task { @MainActor in
-                let now = Date.timeIntervalSinceReferenceDate
-                
-                // Remove off-screen flakes
-                snowflakes.removeAll { flake in
-                    let age = now - flake.spawnTime
-                    return flake.startY + CGFloat(age * Double(flake.speed)) > UIScreen.main.bounds.height + 30
-                }
-                
-                // Spawn new
-                if snowflakes.count < 35 {
-                    snowflakes.append(FocusSnowflake(
-                        startX: CGFloat.random(in: 0...UIScreen.main.bounds.width),
-                        startY: CGFloat.random(in: -40 ... -10),
-                        speed: CGFloat.random(in: 8...25),
-                        size: CGFloat.random(in: 1.5...4),
-                        opacity: CGFloat.random(in: 0.15...0.5),
-                        wobbleFreq: CGFloat.random(in: 0.3...1.2),
-                        wobbleAmp: CGFloat.random(in: 3...12),
-                        spawnTime: now
-                    ))
-                }
-            }
-        }
+        .ignoresSafeArea()
     }
     
     // MARK: - Setup Phase
@@ -442,12 +220,13 @@ struct FocusTimerView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(DesignTokens.textTertiary)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .background {
                             Circle().fill(Color.white.opacity(0.10))
                         }
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
+                .nudgeAccessibility(label: String(localized: "Close focus timer"), hint: nil, traits: .isButton)
                 
                 Spacer()
             }
@@ -456,7 +235,7 @@ struct FocusTimerView: View {
             
             Spacer()
             
-            // Task info — hero treatment with Nudgy
+            // Task info card
             VStack(spacing: DesignTokens.spacingLG) {
                 // Nudgy greeting
                 PenguinSceneView(
@@ -465,32 +244,40 @@ struct FocusTimerView: View {
                     accentColorOverride: DesignTokens.accentActive
                 )
                 
+                // Glass card for task details
                 VStack(spacing: DesignTokens.spacingMD) {
                     TaskIconView(
-                    emoji: item.emoji,
-                    actionType: item.actionType,
-                    size: .large,
-                    accentColor: DesignTokens.accentActive
-                )
-                
-                Text(item.content)
-                    .font(AppTheme.title2)
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .padding(.horizontal, DesignTokens.spacingXXL)
-                
-                if let duration = item.durationLabel {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 11))
-                        Text(String(localized: "Estimated: \(duration)"))
+                        emoji: item.emoji,
+                        actionType: item.actionType,
+                        size: .large,
+                        accentColor: DesignTokens.accentActive
+                    )
+                    
+                    Text(item.content)
+                        .font(AppTheme.title3)
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .padding(.horizontal, DesignTokens.spacingXXL)
+                    
+                    if let duration = item.durationLabel {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 11))
+                            Text(String(localized: "Estimated: \(duration)"))
+                        }
+                        .font(AppTheme.caption)
+                        .foregroundStyle(DesignTokens.textTertiary)
                     }
-                    .font(AppTheme.caption)
-                    .foregroundStyle(DesignTokens.textTertiary)
                 }
-                } // inner VStack
-            } // Task info + Nudgy VStack
+                .padding(DesignTokens.spacingLG)
+                .background {
+                    RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard)
+                        .fill(Color.white.opacity(0.04))
+                }
+                .glassEffect(.regular, in: .rect(cornerRadius: DesignTokens.cornerRadiusCard))
+                .padding(.horizontal, DesignTokens.spacingXXL)
+            }
             
             Spacer()
             
@@ -590,7 +377,10 @@ struct FocusTimerView: View {
     
     private var countdownOverlay: some View {
         ZStack {
-            Color.black.opacity(0.9)
+            // Let the Antarctic night sky show through
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
             
             VStack(spacing: DesignTokens.spacingLG) {
                 Text("\(countdownNumber)")
@@ -599,10 +389,11 @@ struct FocusTimerView: View {
                     .opacity(countdownVisible ? 1 : 0)
                     .scaleEffect(countdownVisible ? 1 : 1.5)
                     .contentTransition(.numericText())
+                    .shadow(color: DesignTokens.accentActive.opacity(0.4), radius: 20)
                 
                 Text(String(localized: "Get ready…"))
                     .font(AppTheme.body)
-                    .foregroundStyle(DesignTokens.textTertiary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
         }
     }
@@ -610,140 +401,119 @@ struct FocusTimerView: View {
     // MARK: - Focusing Phase
     
     private var focusingPhaseView: some View {
-        VStack(spacing: 0) {
-            // Top controls — minimal chrome
-            focusTopBar
+        ZStack(alignment: .bottom) {
+            // Top chrome + ring centered in upper portion
+            VStack(spacing: 0) {
+                focusTopBar
+                
+                Spacer()
+                
+                // The Ring — hero element
+                focusRing
+                
+                // Encouragement slot
+                encouragementBanner
+                    .frame(height: 44)
+                
+                // Reserve space for Nudgy + controls at bottom (~190pt)
+                Spacer()
+                    .frame(minHeight: 190)
+            }
             
-            Spacer()
-            
-            // The Ring — the heart of the experience
-            focusRing
-            
-            // Encouragement slot
-            encouragementBanner
-                .frame(height: 60)
-            
-            Spacer()
-            
-            // Nudgy companion strip
-            nudgyCompanionStrip
-            
-            // Bottom controls
-            focusBottomControls
-                .padding(.bottom, DesignTokens.spacingXL)
+            // Nudgy + controls pinned to bottom, over the Antarctic landscape
+            // Penguin stands on the ice — feels natural and immersive
+            VStack(spacing: DesignTokens.spacingXS) {
+                nudgyCompanionStrip
+                
+                focusBottomControls
+                    .padding(.bottom, DesignTokens.spacingXL)
+            }
         }
     }
     
     // MARK: - Focus Ring
     
     private var focusRing: some View {
-        ZStack {
-            // Outer breathing glow — visible pulsing halo
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            ringAccentColor.opacity(ringGlowIntensity),
-                            ringAccentColor.opacity(ringGlowIntensity * 0.3),
-                            .clear
-                        ],
-                        center: .center,
-                        startRadius: 120,
-                        endRadius: 200
-                    )
-                )
-                .frame(width: 400, height: 400)
-                .scaleEffect(ringScale)
+        GeometryReader { geo in
+            let ringDiameter = min(geo.size.width, geo.size.height) * 0.68
+            let ringRadius = ringDiameter / 2
+            let innerDiameter = ringDiameter - 16
             
-            // Track ring — visible!
-            Circle()
-                .stroke(Color.white.opacity(0.12), lineWidth: 8)
-                .frame(width: 260, height: 260)
-            
-            // Shadow/depth ring behind progress
-            Circle()
-                .stroke(ringAccentColor.opacity(0.08), lineWidth: 14)
-                .frame(width: 260, height: 260)
-                .blur(radius: 4)
-            
-            // Progress ring — thicker, brighter
-            Circle()
-                .trim(from: 0, to: timer.progress)
-                .stroke(
-                    AngularGradient(
-                        colors: [
-                            ringAccentColor.opacity(0.5),
-                            ringAccentColor,
-                            ringAccentColor
-                        ],
-                        center: .center,
-                        startAngle: .degrees(0),
-                        endAngle: .degrees(360 * max(0.01, timer.progress))
-                    ),
-                    style: StrokeStyle(lineWidth: 8, lineCap: .round)
-                )
-                .frame(width: 260, height: 260)
-                .rotationEffect(.degrees(-90))
-                .shadow(color: ringAccentColor.opacity(0.5), radius: 8)
-                .animation(reduceMotion ? .none : .easeOut(duration: 0.5), value: timer.progress)
-            
-            // Progress endpoint dot with glow
-            if timer.progress > 0.02 {
-                ZStack {
+            ZStack {
+                // iOS 26 glass disc — native material, blurs the frosted scene behind it
+                // Breathing scale keeps it alive without any glow
+                Circle()
+                    .fill(Color.clear)
+                    .frame(width: innerDiameter, height: innerDiameter)
+                    .glassEffect(.regular, in: .circle)
+                    .scaleEffect(ringScale)
+                
+                // Track ring — thin guide line
+                Circle()
+                    .stroke(Color.white.opacity(0.10), lineWidth: 3)
+                    .frame(width: ringDiameter, height: ringDiameter)
+                
+                // Progress arc — clean single color
+                Circle()
+                    .trim(from: 0, to: timer.progress)
+                    .stroke(ringAccentColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .frame(width: ringDiameter, height: ringDiameter)
+                    .rotationEffect(.degrees(-90))
+                    .animation(reduceMotion ? .none : .easeOut(duration: 0.5), value: timer.progress)
+                
+                // Endpoint dot
+                if timer.progress > 0.02 {
                     Circle()
                         .fill(ringAccentColor)
-                        .frame(width: 14, height: 14)
-                    Circle()
-                        .fill(ringAccentColor.opacity(0.4))
-                        .frame(width: 24, height: 24)
-                        .blur(radius: 4)
+                        .frame(width: 8, height: 8)
+                        .offset(y: -ringRadius)
+                        .rotationEffect(.degrees(360 * timer.progress - 90))
+                        .animation(reduceMotion ? .none : .easeOut(duration: 0.5), value: timer.progress)
                 }
-                .offset(y: -130) // radius
-                .rotationEffect(.degrees(360 * timer.progress - 90))
-                .animation(reduceMotion ? .none : .easeOut(duration: 0.5), value: timer.progress)
-            }
-            
-            // Center content
-            VStack(spacing: DesignTokens.spacingSM) {
-                // Remaining time — large, prominent
-                Text(timer.formattedRemaining)
-                    .font(.system(size: 56, weight: .ultraLight, design: .rounded))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .animation(.easeOut(duration: 0.2), value: timer.remainingSeconds)
                 
-                // Task label
-                HStack(spacing: 6) {
-                    if let emoji = item.emoji {
-                        Text(emoji)
-                            .font(.system(size: 16))
-                    }
-                    Text(item.content)
-                        .font(AppTheme.caption)
-                        .foregroundStyle(DesignTokens.textSecondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: 180)
-                
-                // Session progress (if multi-session)
-                if timer.sessionsTarget > 1 {
-                    HStack(spacing: 4) {
-                        ForEach(0..<timer.sessionsTarget, id: \.self) { i in
-                            Circle()
-                                .fill(i < timer.sessionsCompleted
-                                    ? DesignTokens.accentComplete
-                                    : i == timer.sessionsCompleted
-                                        ? ringAccentColor
-                                        : Color.white.opacity(0.15)
-                                )
-                                .frame(width: 6, height: 6)
+                // Center content
+                VStack(spacing: DesignTokens.spacingSM) {
+                    Text(timer.formattedRemaining)
+                        .font(.system(size: min(56, ringDiameter * 0.22), weight: .ultraLight, design: .rounded))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(.easeOut(duration: 0.2), value: timer.remainingSeconds)
+                    
+                    HStack(spacing: 6) {
+                        if let emoji = item.emoji {
+                            Text(emoji)
+                                .font(.system(size: 14))
                         }
+                        Text(item.content)
+                            .font(AppTheme.caption)
+                            .foregroundStyle(DesignTokens.textSecondary)
+                            .lineLimit(1)
                     }
-                    .padding(.top, 4)
+                    .frame(maxWidth: ringDiameter * 0.7)
+                    
+                    // Session dots (if multi-session)
+                    if timer.sessionsTarget > 1 {
+                        HStack(spacing: 4) {
+                            ForEach(0..<timer.sessionsTarget, id: \.self) { i in
+                                Circle()
+                                    .fill(i < timer.sessionsCompleted
+                                        ? DesignTokens.accentComplete
+                                        : i == timer.sessionsCompleted
+                                            ? ringAccentColor
+                                            : Color.white.opacity(0.15)
+                                    )
+                                    .frame(width: 5, height: 5)
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .aspectRatio(1, contentMode: .fit)
+        .padding(.horizontal, DesignTokens.spacingLG)
         .onAppear {
             ringBreathing = true
             startRingBreathingAnimation()
@@ -848,8 +618,7 @@ struct FocusTimerView: View {
     // MARK: - Nudgy Companion Strip
     
     private var nudgyCompanionStrip: some View {
-        HStack(spacing: DesignTokens.spacingMD) {
-            // Nudgy — medium size so it's actually visible
+        HStack(alignment: .bottom, spacing: DesignTokens.spacingMD) {
             PenguinSceneView(
                 size: .medium,
                 expressionOverride: nudgyExpression,
@@ -874,7 +643,6 @@ struct FocusTimerView: View {
             Spacer()
         }
         .padding(.horizontal, DesignTokens.spacingLG)
-        .padding(.bottom, DesignTokens.spacingSM)
         .animation(AnimationConstants.springSmooth, value: showNudgyBubble)
     }
     
@@ -890,11 +658,11 @@ struct FocusTimerView: View {
                     ZStack {
                         Circle()
                             .fill(Color.white.opacity(0.10))
-                            .frame(width: 52, height: 52)
+                            .frame(width: 44, height: 44)
                             .glassEffect(.regular.interactive(), in: .circle)
                         
                         Image(systemName: "plus.circle")
-                            .font(.system(size: 20))
+                            .font(.system(size: 18))
                             .foregroundStyle(DesignTokens.textTertiary)
                     }
                     Text(String(localized: "+5 min"))
@@ -924,11 +692,11 @@ struct FocusTimerView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 72, height: 72)
-                        .shadow(color: ringAccentColor.opacity(0.3), radius: 12, y: 4)
+                        .frame(width: 60, height: 60)
+                        .shadow(color: ringAccentColor.opacity(0.2), radius: 8, y: 3)
                     
                     Image(systemName: timer.phase == .paused ? "play.fill" : "pause.fill")
-                        .font(.system(size: 28, weight: .medium))
+                        .font(.system(size: 24, weight: .medium))
                         .foregroundStyle(.white)
                         .contentTransition(.symbolEffect(.replace))
                 }
@@ -950,11 +718,11 @@ struct FocusTimerView: View {
                     ZStack {
                         Circle()
                             .fill(Color.white.opacity(0.10))
-                            .frame(width: 52, height: 52)
+                            .frame(width: 44, height: 44)
                             .glassEffect(.regular.interactive(), in: .circle)
                         
                         Image(systemName: "checkmark")
-                            .font(.system(size: 20, weight: .medium))
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundStyle(DesignTokens.accentComplete)
                     }
                     Text(String(localized: "Done"))
@@ -973,115 +741,128 @@ struct FocusTimerView: View {
     // MARK: - Break Phase
     
     private var breakPhaseView: some View {
-        VStack(spacing: DesignTokens.spacingXL) {
+        ZStack(alignment: .bottom) {
             // Top bar
-            HStack {
-                Button {
-                    skipBreak()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "forward.fill")
-                            .font(.system(size: 11))
-                        Text(String(localized: "Skip break"))
-                            .font(AppTheme.caption.weight(.medium))
-                    }
-                    .foregroundStyle(DesignTokens.textTertiary)
-                    .padding(.horizontal, DesignTokens.spacingMD)
-                    .padding(.vertical, DesignTokens.spacingSM)
-                    .background {
-                        Capsule().fill(Color.white.opacity(0.10))
-                    }
-                    .glassEffect(.regular.interactive(), in: .capsule)
+            VStack {
+                HStack {
+                    Spacer()
+                    // Session progress label
+                    Text(String(localized: "Session \(timer.sessionsCompleted) of \(timer.sessionsTarget) done"))
+                        .font(AppTheme.caption.weight(.medium))
+                        .foregroundStyle(DesignTokens.textTertiary)
+                        .padding(.horizontal, DesignTokens.spacingMD)
+                        .padding(.vertical, DesignTokens.spacingSM)
+                        .background { Capsule().fill(Color.white.opacity(0.08)) }
+                        .glassEffect(.regular, in: .capsule)
+                    Spacer()
                 }
+                .padding(.horizontal, DesignTokens.spacingLG)
+                .padding(.top, DesignTokens.spacingMD)
+                
                 Spacer()
+                
+                // Centered break content
+                VStack(spacing: DesignTokens.spacingLG) {
+                    VStack(spacing: DesignTokens.spacingSM) {
+                        Text(String(localized: "Nice work."))
+                            .font(AppTheme.displayFont)
+                            .foregroundStyle(DesignTokens.textPrimary)
+                        Text(String(localized: "Take a breather."))
+                            .font(AppTheme.body)
+                            .foregroundStyle(DesignTokens.textSecondary)
+                    }
+                    
+                    // Break countdown ring — generous size
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.08), lineWidth: 5)
+                            .frame(width: 160, height: 160)
+                        
+                        Circle()
+                            .trim(from: 0, to: timer.breakProgress)
+                            .stroke(DesignTokens.accentComplete.opacity(0.6), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                            .frame(width: 160, height: 160)
+                            .rotationEffect(.degrees(-90))
+                            .animation(reduceMotion ? .none : .easeOut(duration: 0.5), value: timer.breakProgress)
+                        
+                        VStack(spacing: 2) {
+                            Text(breakFormattedRemaining)
+                                .font(.system(size: 36, weight: .ultraLight, design: .rounded))
+                                .foregroundStyle(DesignTokens.textPrimary)
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                            
+                            Text(String(localized: "break"))
+                                .font(AppTheme.caption)
+                                .foregroundStyle(DesignTokens.textTertiary)
+                        }
+                    }
+                    
+                    // Distraction count
+                    if !timer.distractions.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lightbulb.min.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(DesignTokens.accentStale)
+                            Text(String(localized: "\(timer.distractions.count) thoughts parked"))
+                                .font(AppTheme.caption)
+                                .foregroundStyle(DesignTokens.textTertiary)
+                        }
+                    }
+                }
+                
+                Spacer()
+                    .frame(minHeight: 190)
             }
-            .padding(.horizontal, DesignTokens.spacingLG)
-            .padding(.top, DesignTokens.spacingMD)
             
-            Spacer()
-            
-            // Break content
-            VStack(spacing: DesignTokens.spacingLG) {
+            // Bottom controls over the landscape
+            VStack(spacing: DesignTokens.spacingMD) {
                 PenguinSceneView(
                     size: .medium,
                     expressionOverride: .happy,
                     accentColorOverride: DesignTokens.accentComplete
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, DesignTokens.spacingXL)
                 
-                VStack(spacing: DesignTokens.spacingSM) {
-                    Text(String(localized: "Nice work! Take a breather 🧊"))
-                        .font(AppTheme.title3)
-                        .foregroundStyle(DesignTokens.textPrimary)
-                    
-                    Text(String(localized: "Session \(timer.sessionsCompleted) of \(timer.sessionsTarget) complete"))
-                        .font(AppTheme.body)
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                
-                // Break countdown ring — smaller, calming
-                ZStack {
-                    Circle()
-                        .stroke(Color.white.opacity(0.12), lineWidth: 4)
-                        .frame(width: 120, height: 120)
-                    
-                    Circle()
-                        .trim(from: 0, to: timer.breakProgress)
-                        .stroke(DesignTokens.accentComplete.opacity(0.5), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 120, height: 120)
-                        .rotationEffect(.degrees(-90))
-                        .animation(reduceMotion ? .none : .easeOut(duration: 0.5), value: timer.breakProgress)
-                    
-                    VStack(spacing: 2) {
-                        Text(breakFormattedRemaining)
-                            .font(.system(size: 28, weight: .light, design: .rounded))
-                            .foregroundStyle(DesignTokens.textPrimary)
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
-                        
-                        Text(String(localized: "break"))
-                            .font(AppTheme.hintFont)
-                            .foregroundStyle(DesignTokens.textTertiary)
+                HStack(spacing: DesignTokens.spacingMD) {
+                    Button {
+                        skipBreak()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "forward.fill")
+                                .font(.system(size: 11))
+                            Text(String(localized: "Skip"))
+                                .font(AppTheme.caption.weight(.medium))
+                        }
+                        .foregroundStyle(DesignTokens.textTertiary)
+                        .padding(.horizontal, DesignTokens.spacingMD)
+                        .padding(.vertical, DesignTokens.spacingSM + 2)
+                        .background { Capsule().fill(Color.white.opacity(0.08)) }
+                        .glassEffect(.regular.interactive(), in: .capsule)
                     }
-                }
-                
-                // Distraction count (if any captured)
-                if !timer.distractions.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "lightbulb.min.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(DesignTokens.accentStale)
-                        Text(String(localized: "\(timer.distractions.count) thoughts parked — review after"))
-                            .font(AppTheme.caption)
-                            .foregroundStyle(DesignTokens.textTertiary)
+                    
+                    Button {
+                        startNextSession()
+                    } label: {
+                        HStack(spacing: DesignTokens.spacingSM) {
+                            Text(String(localized: "Start Next Session"))
+                                .font(AppTheme.headline)
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(DesignTokens.accentActive.opacity(0.2))
+                        }
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
                     }
-                    .padding(.top, DesignTokens.spacingSM)
+                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, DesignTokens.spacingLG)
+                .padding(.bottom, DesignTokens.spacingXL)
             }
-            
-            Spacer()
-            
-            // Return to focus button
-            Button {
-                startNextSession()
-            } label: {
-                HStack(spacing: DesignTokens.spacingSM) {
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 14))
-                    Text(String(localized: "Start Next Session"))
-                        .font(AppTheme.headline)
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background {
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(DesignTokens.accentActive.opacity(0.2))
-                }
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, DesignTokens.spacingXXL)
-            .padding(.bottom, DesignTokens.spacingXXXL)
         }
     }
     
@@ -1109,7 +890,7 @@ struct FocusTimerView: View {
                 
                 // Title
                 VStack(spacing: DesignTokens.spacingSM) {
-                    Text(String(localized: "Focus complete! 🎉"))
+                    Text(String(localized: "Focus complete."))
                         .font(AppTheme.displayFont)
                         .foregroundStyle(DesignTokens.textPrimary)
                     
@@ -1424,7 +1205,11 @@ struct FocusTimerView: View {
     // MARK: - Presets
     
     private var focusPresets: [(label: String, minutes: Int)] {
-        [
+        let template = CategoryTemplateRegistry.template(for: item.resolvedCategory)
+        if let catPresets = template.timerPresets, !catPresets.isEmpty {
+            return catPresets.map { ($0.label, $0.minutes) }
+        }
+        return [
             ("5", 5),
             ("15", 15),
             ("25", 25),
@@ -1436,9 +1221,12 @@ struct FocusTimerView: View {
     // MARK: - Ring Color
     
     private var ringAccentColor: Color {
+        let categoryColor = item.resolvedCategory == .general
+            ? DesignTokens.accentActive
+            : item.resolvedCategory.primaryColor
         switch timer.phase {
         case .setup, .countdown:
-            return DesignTokens.accentActive
+            return categoryColor
         case .focusing, .paused:
             if timer.progress < 0.5 {
                 return DesignTokens.accentActive
@@ -1488,10 +1276,13 @@ struct FocusTimerView: View {
         lastEncouragementElapsed = 0
         
         nudgyExpression = .thinking
-        showNudgyMessage(String(localized: "I'll be right here. You've got this! 🐧"))
+        showNudgyMessage(String(localized: "I'll be right here. You've got this."))
         
         HapticService.shared.actionButtonTap()
         SoundService.shared.play(.micStart)
+        
+        // Start Live Activity for Dynamic Island
+        startFocusLiveActivity()
         
         startTick()
     }
@@ -1534,7 +1325,7 @@ struct FocusTimerView: View {
             timer.phase = .focusing
             startTick()
             nudgyExpression = .thinking
-            showNudgyMessage(String(localized: "Welcome back! Let's keep going 💪"))
+            showNudgyMessage(String(localized: "Welcome back. Let's keep going."))
         } else {
             timer.phase = .paused
             tickTimer?.invalidate()
@@ -1549,7 +1340,7 @@ struct FocusTimerView: View {
         timer.totalSeconds += 300  // +5 min
         timer.remainingSeconds += 300
         HapticService.shared.actionButtonTap()
-        showNudgyMessage(String(localized: "Added 5 more minutes. You're on a roll! 🔥"))
+        showNudgyMessage(String(localized: "Added 5 more minutes. You're on a roll."))
     }
     
     private func focusSessionComplete() {
@@ -1562,7 +1353,8 @@ struct FocusTimerView: View {
         SoundService.shared.play(.taskDone)
         
         if timer.sessionsCompleted >= timer.sessionsTarget {
-            // All sessions done
+            // All sessions done — end Live Activity
+            Task { await LiveActivityManager.shared.endAll() }
             withAnimation(AnimationConstants.springSmooth) {
                 timer.phase = .completed
             }
@@ -1598,14 +1390,22 @@ struct FocusTimerView: View {
             timer.phase = .focusing
         }
         nudgyExpression = .thinking
-        showNudgyMessage(String(localized: "Session \(timer.sessionsCompleted + 1) — let's go! 🔥"))
+        showNudgyMessage(String(localized: "Session \(timer.sessionsCompleted + 1) — let's go."))
         startTick()
     }
     
     private func endSession() {
+        // Accumulate current session's elapsed time before recording
+        if timer.phase == .focusing || timer.phase == .paused {
+            timer.totalFocusedSeconds += timer.elapsedSeconds
+        }
         recordFocusTime()
+        recordHealthKitMindfulSession()
         tickTimer?.invalidate()
         tickTimer = nil
+        
+        // End Live Activity
+        Task { await LiveActivityManager.shared.endAll() }
         
         // Convert parked distractions to new tasks
         if !timer.distractions.isEmpty {
@@ -1613,15 +1413,24 @@ struct FocusTimerView: View {
             for thought in timer.distractions {
                 _ = repo.createManual(content: thought)
             }
+            NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
         }
         
         isPresented = false
     }
     
     private func completeTask() {
+        // Accumulate current session's elapsed time before recording
+        if timer.phase == .focusing || timer.phase == .paused {
+            timer.totalFocusedSeconds += timer.elapsedSeconds
+        }
         recordFocusTime()
+        recordHealthKitMindfulSession()
         tickTimer?.invalidate()
         tickTimer = nil
+        
+        // End Live Activity
+        Task { await LiveActivityManager.shared.endAll() }
         
         let repo = NudgeRepository(modelContext: modelContext)
         repo.markDone(item)
@@ -1629,7 +1438,7 @@ struct FocusTimerView: View {
         let isAllClear = repo.activeCount() == 0
         RewardService.shared.recordCompletion(context: modelContext, item: item, isAllClear: isAllClear)
         
-        HapticService.shared.swipeDone()
+        HapticService.shared.completionHaptic(for: item.resolvedCategory)
         SoundService.shared.play(.taskDone)
         SoundService.shared.play(.fishCaught)
         
@@ -1646,11 +1455,52 @@ struct FocusTimerView: View {
     
     private func recordFocusTime() {
         guard timer.isActive || timer.phase == .completed else { return }
-        let elapsed = timer.totalFocusedSeconds + timer.elapsedSeconds
+        // Callers must accumulate current session elapsed into totalFocusedSeconds
+        // before calling this method (endSession, completeTask, onDisappear all do this).
+        let elapsed = timer.totalFocusedSeconds
         if elapsed > 30 {
             item.actualMinutes = (item.actualMinutes ?? 0) + max(1, elapsed / 60)
             item.updatedAt = Date()
-            try? modelContext.save()
+            do { try modelContext.save() } catch { Log.ui.error("[FocusTimer] Save failed: \(error, privacy: .public)") }
+
+            // Persist daily focus minutes for the You tab glance card
+            let todayKey = "focusMinutesToday_\(Date().formatted(.dateTime.year().month().day()))"
+            let existing = UserDefaults.standard.integer(forKey: todayKey)
+            UserDefaults.standard.set(existing + max(1, elapsed / 60), forKey: todayKey)
+        }
+    }
+    
+    /// Write focus timer session as a Mindful Session to Apple Health.
+    private func recordHealthKitMindfulSession() {
+        let elapsed = timer.totalFocusedSeconds
+        guard elapsed > 60 else { return } // Only record sessions > 1 minute
+        let endDate = Date()
+        let startDate = endDate.addingTimeInterval(TimeInterval(-elapsed))
+        Task {
+            await HealthService.shared.recordMindfulSession(
+                startDate: startDate,
+                endDate: endDate,
+                taskContent: item.content
+            )
+        }
+    }
+    
+    // MARK: - Live Activity
+    
+    private func startFocusLiveActivity() {
+        let emoji = item.emoji ?? "timer"
+        let cat = item.resolvedCategory
+        Task {
+            await LiveActivityManager.shared.start(
+                taskContent: "🎯 " + item.content,
+                taskEmoji: emoji,
+                queuePosition: 1,
+                queueTotal: 1,
+                accentHex: "5E5CE6",  // Focus purple
+                taskID: item.id.uuidString,
+                categoryLabel: cat != .general ? "\(cat.emoji) Focusing" : "🎯 Focusing",
+                categoryColorHex: cat != .general ? cat.primaryColorHex : "5E5CE6"
+            )
         }
     }
     
@@ -1663,7 +1513,7 @@ struct FocusTimerView: View {
         distractionText = ""
         HapticService.shared.actionButtonTap()
         
-        showNudgyMessage(String(localized: "Parked it! Back to focus 🎯"))
+        showNudgyMessage(String(localized: "Parked it. Back to focus."))
     }
     
     // MARK: - Nudgy Companion Logic
@@ -1699,16 +1549,16 @@ struct FocusTimerView: View {
     // MARK: - Encouragement System
     
     private let encouragements: [String] = [
-        String(localized: "You're doing amazing 🐧"),
+        String(localized: "You're doing amazing."),
         String(localized: "One thing at a time. You've got this."),
-        String(localized: "Focus looks good on you ✨"),
-        String(localized: "Almost there, stay with it!"),
+        String(localized: "Focus looks good on you."),
+        String(localized: "Almost there, stay with it."),
         String(localized: "Your future self is thanking you."),
         String(localized: "Breathe. You're exactly where you need to be."),
-        String(localized: "Small progress is still progress 💪"),
-        String(localized: "The hardest part was starting. Look at you go!"),
-        String(localized: "Deep breaths. You're doing the thing. 🌊"),
-        String(localized: "Time well spent. Keep it up!"),
+        String(localized: "Small progress is still progress."),
+        String(localized: "The hardest part was starting. Look at you go."),
+        String(localized: "Deep breaths. You're doing the thing."),
+        String(localized: "Time well spent. Keep it up."),
     ]
     
     private func checkEncouragement() {
@@ -1730,7 +1580,8 @@ struct FocusTimerView: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
             pulseScale = 1.1
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.3))
             withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                 pulseScale = 1.0
             }
@@ -1749,40 +1600,9 @@ struct FocusTimerView: View {
     
     private func startRingBreathingAnimation() {
         guard !reduceMotion else { return }
-        // Inhale
-        withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
-            ringScale = 1.06
-            ringGlowIntensity = 0.45
+        withAnimation(.easeInOut(duration: 5).repeatForever(autoreverses: true)) {
+            ringScale = 1.015
         }
-    }
-}
-
-// MARK: - Focus Snowflake
-
-private struct FocusSnowflake: Identifiable {
-    let id = UUID()
-    let startX: CGFloat
-    let startY: CGFloat
-    let speed: CGFloat
-    let size: CGFloat
-    let opacity: CGFloat
-    let wobbleFreq: CGFloat
-    let wobbleAmp: CGFloat
-    let spawnTime: TimeInterval
-}
-
-// MARK: - Stable RNG for deterministic star field
-
-private struct StableRNG {
-    private var state: UInt64
-    
-    init(seed: UInt64) {
-        state = seed
-    }
-    
-    mutating func next() -> Double {
-        state = state &* 6364136223846793005 &+ 1442695040888963407
-        return Double((state >> 33) ^ state) / Double(UInt64.max)
     }
 }
 

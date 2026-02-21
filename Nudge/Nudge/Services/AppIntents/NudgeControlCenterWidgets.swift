@@ -93,18 +93,18 @@ struct NudgeBrainDumpControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
             ControlWidgetButton(action: BrainDumpControlIntent()) {
-                Label("Brain Dump", systemImage: "brain.head.profile")
+                Label("Unload", systemImage: "tray.and.arrow.down.fill")
             }
         }
-        .displayName("Brain Dump")
-        .description("Open Nudge's brain dump to capture everything on your mind.")
+        .displayName("Unload")
+        .description("Unload everything on your mind into Nudgy.")
     }
 }
 
 /// Intent that opens brain dump via deep link.
 @available(iOS 18.0, *)
 struct BrainDumpControlIntent: ControlConfigurationIntent {
-    static var title: LocalizedStringResource = "Brain Dump"
+    static var title: LocalizedStringResource = "Unload"
     static var isDiscoverable = false
     
     @MainActor

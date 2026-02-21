@@ -7,6 +7,8 @@
 
 import SwiftData
 import SwiftUI
+import CoreTransferable
+import UniformTypeIdentifiers
 
 // MARK: - Enums
 
@@ -81,6 +83,7 @@ enum ActionType: String, Codable, CaseIterable {
     case search        = "SEARCH"
     case navigate      = "NAVIGATE"
     case addToCalendar = "CALENDAR"
+    case setAlarm      = "ALARM"
     
     var icon: String {
         switch self {
@@ -91,6 +94,7 @@ enum ActionType: String, Codable, CaseIterable {
         case .search:        return "magnifyingglass"
         case .navigate:      return "location.fill"
         case .addToCalendar: return "calendar.badge.plus"
+        case .setAlarm:      return "alarm.fill"
         }
     }
     
@@ -103,6 +107,7 @@ enum ActionType: String, Codable, CaseIterable {
         case .search:        return String(localized: "Search")
         case .navigate:      return String(localized: "Navigate")
         case .addToCalendar: return String(localized: "Add to Calendar")
+        case .setAlarm:      return String(localized: "Set Alarm")
         }
     }
     
@@ -129,19 +134,19 @@ enum ActionType: String, Codable, CaseIterable {
 final class NudgeItem {
     
     // MARK: Identity
-    var id: UUID
+    var id: UUID = UUID()
     
     // MARK: Content
-    var content: String
+    var content: String = ""
     var emoji: String?
     
     // MARK: Source
-    var sourceTypeRaw: String
+    var sourceTypeRaw: String = "manual"
     var sourceUrl: String?
     var sourcePreview: String?
     
     // MARK: Status
-    var statusRaw: String
+    var statusRaw: String = "active"
     var snoozedUntil: Date?
     
     // MARK: Scheduling
@@ -149,12 +154,12 @@ final class NudgeItem {
     var priorityRaw: String?
     
     // MARK: Timestamps
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
     var completedAt: Date?
     
     // MARK: Ordering
-    var sortOrder: Int
+    var sortOrder: Int = 0
     
     // MARK: Action
     var actionTypeRaw: String?
@@ -179,6 +184,9 @@ final class NudgeItem {
     
     // MARK: Categorization
     
+    /// Task category raw value (maps to TaskCategory enum)
+    var categoryRaw: String?
+    
     /// Custom category color hex (user-chosen from palette)
     var categoryColorHex: String?
     
@@ -199,6 +207,20 @@ final class NudgeItem {
     
     /// Energy level required: "low", "medium", "high" (for energy-aware scheduling)
     var energyLevelRaw: String?
+    
+    // MARK: Location (CoreLocation)
+    
+    /// Place name (reverse-geocoded or user-entered, e.g. "FedEx Office")
+    var locationName: String?
+    
+    /// Latitude for geofence / proximity surfacing
+    var latitude: Double?
+    
+    /// Longitude for geofence / proximity surfacing
+    var longitude: Double?
+    
+    /// Geofence radius in meters (default 200m if location is set)
+    var geofenceRadius: Double?
     
     // MARK: Relationships
     var brainDump: BrainDump?
@@ -222,8 +244,13 @@ final class NudgeItem {
         scheduledTime: Date? = nil,
         routineID: UUID? = nil,
         energyLevel: EnergyLevel? = nil,
+        category: TaskCategory? = nil,
         categoryColorHex: String? = nil,
-        categoryIcon: String? = nil
+        categoryIcon: String? = nil,
+        locationName: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        geofenceRadius: Double? = nil
     ) {
         self.id = id
         self.content = content
@@ -245,8 +272,13 @@ final class NudgeItem {
         self.scheduledTime = scheduledTime
         self.routineID = routineID
         self.energyLevelRaw = energyLevel?.rawValue
-        self.categoryColorHex = categoryColorHex
-        self.categoryIcon = categoryIcon
+        self.categoryRaw = category?.rawValue
+        self.categoryColorHex = categoryColorHex ?? category?.primaryColorHex
+        self.categoryIcon = categoryIcon ?? category?.icon
+        self.locationName = locationName
+        self.latitude = latitude
+        self.longitude = longitude
+        self.geofenceRadius = geofenceRadius
     }
     
     // MARK: Computed — Source Type
@@ -277,6 +309,36 @@ final class NudgeItem {
         set { priorityRaw = newValue?.rawValue }
     }
     
+    // MARK: Computed — Category
+    
+    var category: TaskCategory? {
+        get { categoryRaw.flatMap { TaskCategory(rawValue: $0) } }
+        set {
+            categoryRaw = newValue?.rawValue
+            // Auto-set color + icon if not custom-overridden
+            if let cat = newValue {
+                if categoryColorHex == nil || categoryColorHex == category?.primaryColorHex {
+                    categoryColorHex = cat.primaryColorHex
+                }
+                if categoryIcon == nil || categoryIcon == category?.icon {
+                    categoryIcon = cat.icon
+                }
+            }
+            updatedAt = Date()
+        }
+    }
+    
+    /// Resolved category: explicit or auto-classified from content + actionType.
+    var resolvedCategory: TaskCategory {
+        if let cat = category { return cat }
+        return CategoryClassifier.classify(content: content, actionType: actionType)
+    }
+    
+    /// Template for this item's category.
+    var categoryTemplate: CategoryTemplate {
+        CategoryTemplateRegistry.template(for: resolvedCategory)
+    }
+    
     /// Whether this task has a due date set
     var hasDueDate: Bool {
         dueDate != nil
@@ -297,6 +359,53 @@ final class NudgeItem {
     /// Item is stale: active for 3+ days
     var isStale: Bool {
         status == .active && ageInDays >= 3
+    }
+    
+    /// Category-aware stale threshold (days).
+    /// Time-sensitive categories become stale faster; long-form ones get more slack.
+    var categoryAwareStaleDays: Int {
+        switch resolvedCategory {
+        case .call, .text, .email:       return 2   // Communication goes stale fast
+        case .alarm, .appointment:       return 1   // Time-bound — stale quickly
+        case .exercise, .health:         return 2   // Daily habits shouldn't linger
+        case .shopping, .errand:         return 3   // Standard errands
+        case .homework, .work:           return 4   // Larger tasks need more time
+        case .creative, .cooking:        return 5   // Creative needs breathing room
+        case .finance:                   return 4   // Moderate urgency
+        case .cleaning, .maintenance:    return 5   // Chores can wait a bit
+        case .selfCare, .social:         return 3   // Important but flexible
+        case .link, .general:            return 3   // Default
+        }
+    }
+    
+    /// Whether this item is stale according to its category-specific threshold.
+    var isCategoryStale: Bool {
+        status == .active && ageInDays >= categoryAwareStaleDays
+    }
+    
+    /// Suggested duration (in minutes) based on category template/type.
+    var suggestedDurationMinutes: Int {
+        switch resolvedCategory {
+        case .call:           return 15
+        case .text, .email:   return 10
+        case .link:           return 5
+        case .homework:       return 45
+        case .cooking:        return 30
+        case .alarm:          return 5
+        case .exercise:       return 30
+        case .cleaning:       return 20
+        case .shopping:       return 30
+        case .appointment:    return 60
+        case .finance:        return 20
+        case .health:         return 30
+        case .creative:       return 45
+        case .errand:         return 25
+        case .selfCare:       return 20
+        case .work:           return 45
+        case .social:         return 30
+        case .maintenance:    return 30
+        case .general:        return 15
+        }
     }
     
     /// Item is overdue: snoozed and past the snooze time
@@ -323,7 +432,7 @@ final class NudgeItem {
     var accentStatus: AccentStatus {
         if status == .done { return .complete }
         if isOverdue { return .overdue }
-        if isStale { return .stale }
+        if isCategoryStale { return .stale }
         return .active
     }
     
@@ -390,6 +499,52 @@ final class NudgeItem {
     var isFromRoutine: Bool {
         routineID != nil
     }
+    
+    /// Whether this task has location data attached
+    var hasLocation: Bool {
+        latitude != nil && longitude != nil
+    }
+}
+
+// MARK: - Transferable
+
+extension NudgeItem: Transferable {
+    
+    /// Lightweight representation for drag-and-drop and share sheet.
+    struct TransferData: Codable {
+        let content: String
+        let emoji: String?
+        let categoryRaw: String?
+        let priorityRaw: String?
+        let dueDate: Date?
+        let locationName: String?
+    }
+    
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(contentType: .nudgeTask) { item in
+            try JSONEncoder().encode(item.transferData)
+        } importing: { _ in
+            // NudgeItem can't be reconstructed outside a ModelContext — ignore
+            throw CocoaError(.fileReadUnknown)
+        }
+        ProxyRepresentation(exporting: \.content) // Plain text fallback
+    }
+    
+    /// Export data for transfer.
+    var transferData: TransferData {
+        TransferData(
+            content: content,
+            emoji: emoji,
+            categoryRaw: categoryRaw,
+            priorityRaw: priorityRaw,
+            dueDate: dueDate,
+            locationName: locationName
+        )
+    }
+}
+
+extension UTType {
+    static let nudgeTask = UTType(exportedAs: "com.tarsitgroup.nudge.task")
 }
 
 // MARK: - Energy Level

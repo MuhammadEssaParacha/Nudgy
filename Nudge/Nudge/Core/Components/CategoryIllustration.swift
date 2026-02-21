@@ -21,7 +21,7 @@ import SwiftUI
 // MARK: - Category Style
 
 /// A visual category with Apple emoji icon, color palette, and personality.
-nonisolated struct CategoryStyle: Sendable {
+struct CategoryStyle {
     let id: String
     let emoji: String                 // Apple emoji character (primary icon)
     let symbol: String                // SF Symbol fallback
@@ -50,18 +50,17 @@ struct CategoryIllustrationView: View {
         )
     }
     
-    /// If the item has an explicit emoji set, render it directly
-    private var displayEmoji: String {
-        // Use item's own emoji if set, otherwise use matched category emoji
+    /// If the item has an explicit emoji, resolve its SF Symbol
+    private var displaySymbol: String {
         if let itemEmoji = item.emoji, !itemEmoji.isEmpty {
-            return itemEmoji
+            return TaskIconResolver.resolveSymbol(for: itemEmoji)
         }
-        return style.emoji
+        return style.symbol
     }
     
     var body: some View {
         let s = style
-        let emojiSize = size * 0.52
+        let iconSize = size * 0.45
         
         ZStack {
             // Background gradient circle with subtle glow
@@ -85,9 +84,10 @@ struct CategoryIllustrationView: View {
                         )
                 )
             
-            // Apple emoji rendered large — this IS the "custom memoji"
-            Text(displayEmoji)
-                .font(.system(size: emojiSize))
+            // SF Symbol rendered crisp at any size
+            Image(systemName: displaySymbol)
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(s.primaryColor)
                 .minimumScaleFactor(0.7)
         }
         .frame(width: size, height: size)
@@ -111,17 +111,18 @@ struct CategoryIllustrationCompact: View {
         CategoryMatcher.match(content: content, emoji: emoji, actionType: actionType, contactName: nil)
     }
     
-    private var displayEmoji: String {
-        if let emoji, !emoji.isEmpty { return emoji }
-        return style.emoji
+    private var displaySymbol: String {
+        if let emoji, !emoji.isEmpty { return TaskIconResolver.resolveSymbol(for: emoji) }
+        return style.symbol
     }
     
     var body: some View {
         let s = style
-        let emojiSize = size * 0.50
+        let iconSize = size * 0.42
         
-        Text(displayEmoji)
-            .font(.system(size: emojiSize))
+        Image(systemName: displaySymbol)
+            .font(.system(size: iconSize, weight: .semibold))
+            .foregroundStyle(s.primaryColor)
             .minimumScaleFactor(0.7)
             .frame(width: size, height: size)
             .background(
@@ -166,6 +167,7 @@ nonisolated enum CategoryMatcher {
             case .search:        return categories["search"]!
             case .navigate:      return categories["navigate"]!
             case .addToCalendar: return categories["calendar"]!
+            case .setAlarm:      return categories["deadline"]!
             }
         }
         
@@ -785,8 +787,9 @@ nonisolated enum CategoryMatcher {
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(.white)
                             HStack(spacing: 4) {
-                                Text(style.emoji)
-                                    .font(.system(size: 10))
+                                Image(systemName: style.symbol)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(style.primaryColor)
                                 Text(style.label)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.white.opacity(0.5))

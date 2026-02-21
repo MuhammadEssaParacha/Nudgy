@@ -5,7 +5,7 @@
 //  Daily challenge / mini-quest system for ADHD-friendly micro-goals.
 //
 //  Each day generates 2–3 small challenges based on the player's current
-//  level and streak. Completing them awards bonus fish (snowflakes).
+//  level and streak. Completing them awards bonus fish.
 //
 //  Challenges are intentionally tiny and achievable:
 //    - "Complete 1 task"                     (always available)
@@ -37,6 +37,7 @@ struct DailyChallenge: Identifiable, Equatable {
         case brainDump
         case maintainStreak
         case completeBeforeNoon
+        case completeCategory(rawValue: String, count: Int)
     }
 }
 
@@ -45,7 +46,7 @@ struct DailyChallenge: Identifiable, Equatable {
 enum ChallengeGenerator {
 
     /// Generate today's challenges based on player state.
-    static func generateDaily(level: Int, streak: Int) -> [DailyChallenge] {
+    static func generateDaily(level: Int, streak: Int, topCategory: TaskCategory? = nil) -> [DailyChallenge] {
         var challenges: [DailyChallenge] = []
 
         // Always: Complete 1 task (easy win)
@@ -115,6 +116,18 @@ enum ChallengeGenerator {
                 icon: "flame.fill",
                 bonusFish: streak,
                 requirement: .maintainStreak
+            ))
+        }
+
+        // Phase 10: Category-specific challenge (level 3+ and when user has a dominant category)
+        if level >= 3, let cat = topCategory, cat != .general {
+            challenges.append(DailyChallenge(
+                id: "category-\(cat.rawValue)",
+                title: String(localized: "\(cat.emoji) \(cat.label) Focus"),
+                description: String(localized: "Complete a \(cat.label.lowercased()) task"),
+                icon: "tag.fill",
+                bonusFish: 2,
+                requirement: .completeCategory(rawValue: cat.rawValue, count: 1)
             ))
         }
 

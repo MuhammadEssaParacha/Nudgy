@@ -47,14 +47,22 @@ struct NudgeTaskEntity: AppEntity {
     @Property(title: "Priority")
     var priority: String?
     
+    @Property(title: "Category")
+    var categoryName: String?
+    
+    @Property(title: "Category Emoji")
+    var categoryEmoji: String?
+    
     @Property(title: "Created")
     var createdAt: Date
     
     var displayRepresentation: DisplayRepresentation {
-        let emoji = actionType.flatMap { ActionType(rawValue: $0)?.icon } ?? "circle"
+        let catEmoji = categoryEmoji ?? ""
         let subtitle: String
         if let contact = contactName {
             subtitle = contact
+        } else if let cat = categoryName, cat != "General" {
+            subtitle = "\(catEmoji) \(cat)"
         } else if let dur = estimatedMinutes {
             subtitle = "\(dur) min"
         } else {
@@ -64,7 +72,7 @@ struct NudgeTaskEntity: AppEntity {
         return DisplayRepresentation(
             title: LocalizedStringResource(stringLiteral: title),
             subtitle: LocalizedStringResource(stringLiteral: subtitle),
-            image: .init(systemName: emoji)
+            image: .init(systemName: categoryEmoji != nil ? "tag.fill" : "circle")
         )
     }
     
@@ -79,6 +87,8 @@ struct NudgeTaskEntity: AppEntity {
         self.dueDate = item.dueDate
         self.estimatedMinutes = item.estimatedMinutes
         self.priority = item.priorityRaw
+        self.categoryName = item.resolvedCategory.label
+        self.categoryEmoji = item.resolvedCategory.emoji
         self.createdAt = item.createdAt
     }
     
@@ -153,7 +163,11 @@ extension NudgeTaskQuery: EntityStringQuery {
         
         let items = (try? context.fetch(descriptor)) ?? []
         return items
-            .filter { $0.content.lowercased().contains(searchText) }
+            .filter {
+                $0.content.lowercased().contains(searchText) ||
+                $0.resolvedCategory.label.lowercased().contains(searchText) ||
+                $0.resolvedCategory.emoji.contains(searchText)
+            }
             .prefix(10)
             .map { NudgeTaskEntity(from: $0) }
     }

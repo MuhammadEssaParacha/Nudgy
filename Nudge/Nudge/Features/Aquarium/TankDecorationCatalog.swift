@@ -3,7 +3,7 @@
 //  Nudge
 //
 //  Buyable tank decorations — coral, shells, treasure chest, castle.
-//  Purchase with snowflakes. Stored in NudgyWardrobe as comma-separated
+//  Purchase with fish. Stored in NudgyWardrobe as comma-separated
 //  IDs. Rendered at bottom of AquariumTankView as vector shapes.
 //
 
@@ -33,6 +33,19 @@ enum TankDecoration: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// SF Symbol icon for UI display.
+    var icon: String {
+        switch self {
+        case .coral:     return "leaf.fill"
+        case .shell:     return "fossil.shell.fill"
+        case .treasure:  return "shippingbox.fill"
+        case .castle:    return "building.columns.fill"
+        case .anchor:    return "anchor.circle.fill"
+        case .starfish:  return "star.fill"
+        }
+    }
+    
+    /// Deprecated — use `icon` for rendering.
     var emoji: String {
         switch self {
         case .coral:     return "🪸"
@@ -44,7 +57,7 @@ enum TankDecoration: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Snowflake cost to unlock.
+    /// Fish cost to unlock.
     var cost: Int {
         switch self {
         case .coral:     return 8
@@ -521,15 +534,15 @@ struct DecorationShopView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: DesignTokens.spacingMD) {
-                    // Snowflake balance
+                    // Fish balance
                     HStack(spacing: 6) {
-                        Image(systemName: "snowflake")
+                        Image(systemName: "fish.fill")
                             .font(.system(size: 16))
                             .foregroundStyle(Color(hex: "4FC3F7"))
-                        Text("\(rewardService.snowflakes)")
+                        Text("\(rewardService.fish)")
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundStyle(DesignTokens.textPrimary)
-                        Text(String(localized: "snowflakes"))
+                        Text(String(localized: "fish"))
                             .font(AppTheme.caption)
                             .foregroundStyle(DesignTokens.textTertiary)
                         Spacer()
@@ -569,7 +582,7 @@ struct DecorationShopView: View {
     private func decorationCard(_ deco: TankDecoration) -> some View {
         let isOwned = rewardService.unlockedDecorations.contains(deco.rawValue)
         let isPlaced = rewardService.placedDecorations.contains(deco.rawValue)
-        let canAfford = rewardService.snowflakes >= deco.cost
+        let canAfford = rewardService.fish >= deco.cost
 
         return VStack(spacing: DesignTokens.spacingSM) {
             // Preview
@@ -604,7 +617,7 @@ struct DecorationShopView: View {
                     buyDecoration(deco)
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "snowflake")
+                        Image(systemName: "fish.fill")
                             .font(.system(size: 10))
                         Text("\(deco.cost)")
                             .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -625,13 +638,13 @@ struct DecorationShopView: View {
         .frame(maxWidth: .infinity)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
         .nudgeAccessibility(
-            label: "\(deco.label), \(isOwned ? (isPlaced ? String(localized: "placed") : String(localized: "owned")) : String(localized: "\(deco.cost) snowflakes"))",
+            label: "\(deco.label), \(isOwned ? (isPlaced ? String(localized: "placed") : String(localized: "owned")) : String(localized: "\(deco.cost) fish"))",
             hint: isOwned ? String(localized: "Tap to toggle placement") : String(localized: "Tap to purchase")
         )
     }
 
     private func buyDecoration(_ deco: TankDecoration) {
-        guard rewardService.snowflakes >= deco.cost else { return }
+        guard rewardService.fish >= deco.cost else { return }
         rewardService.unlockDecoration(deco.rawValue, cost: deco.cost, context: modelContext)
         HapticService.shared.swipeDone()
     }

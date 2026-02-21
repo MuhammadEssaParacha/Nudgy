@@ -9,6 +9,7 @@
 
 import AVFoundation
 import Foundation
+import os
 
 /// Generates rich synthesized sounds for the Antarctic sound palette.
 /// Uses additive synthesis with harmonics, ADSR envelopes, and spatial effects.
@@ -385,7 +386,7 @@ enum SoundGenerator {
             )
             try file.write(from: buffer)
         } catch {
-            print("⚠️ SoundGenerator: Failed to write \(url.lastPathComponent): \(error)")
+            Log.services.warning("SoundGenerator: Failed to write \(url.lastPathComponent): \(error, privacy: .public)")
         }
     }
 }

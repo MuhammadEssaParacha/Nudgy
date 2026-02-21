@@ -36,7 +36,9 @@ def rgba(r, g, b, a):
 PLUMAGE_DARK = rgb(26, 26, 46)       # #1A1A2E
 PLUMAGE_HIGHLIGHT = rgb(42, 42, 66)  # #2A2A42
 PLUMAGE_EDGE = rgb(52, 52, 80)       # subtle edge light
-BELLY_TOP = rgb(245, 245, 247)       # #F5F5F7
+BELLY_YELLOW = rgb(255, 224, 102)     # #FFE066 — new warm yellow top
+BELLY_WARM   = rgb(255, 240, 176)    # #FFF0B0 — warm midtone
+BELLY_TOP = rgb(245, 245, 247)       # #F5F5F7 — fades to white at bottom
 BELLY_BOTTOM = rgb(232, 232, 236)    # #E8E8EC
 ACCENT_BLUE = rgb(0, 122, 255)       # #007AFF
 ACCENT_BLUE_DARK = rgb(0, 85, 204)   # #0055CC
@@ -161,45 +163,56 @@ def draw_body_shape(ctx, cx, cy, psize, shadow=False):
     ctx.fill()
 
 
+def draw_belly_oval(ctx, cx, belly_cy, belly_w, belly_h):
+    """Helper: draw an ellipse path for the belly."""
+    kappa = 0.5522848
+    ctx.new_path()
+    ctx.move_to(cx, belly_cy - belly_h)
+    ctx.curve_to(cx + belly_w * kappa, belly_cy - belly_h, cx + belly_w, belly_cy - belly_h * kappa, cx + belly_w, belly_cy)
+    ctx.curve_to(cx + belly_w, belly_cy + belly_h * kappa, cx + belly_w * kappa, belly_cy + belly_h, cx, belly_cy + belly_h)
+    ctx.curve_to(cx - belly_w * kappa, belly_cy + belly_h, cx - belly_w, belly_cy + belly_h * kappa, cx - belly_w, belly_cy)
+    ctx.curve_to(cx - belly_w, belly_cy - belly_h * kappa, cx - belly_w * kappa, belly_cy - belly_h, cx, belly_cy - belly_h)
+    ctx.close_path()
+
+
 def draw_belly(ctx, cx, cy, psize):
-    """White belly patch — inner elliptical shape with gradient."""
+    """Yellow-to-white belly patch matching new in-app Nudgy design."""
     belly_w = psize * 0.30
     belly_h = psize * 0.38
     belly_cy = cy + psize * 0.14
 
-    # Smooth oval using bezier approximation of ellipse
-    kappa = 0.5522848  # bezier approximation constant for circles
-    ctx.new_path()
-    ctx.move_to(cx, belly_cy - belly_h)
-    ctx.curve_to(
-        cx + belly_w * kappa, belly_cy - belly_h,
-        cx + belly_w, belly_cy - belly_h * kappa,
-        cx + belly_w, belly_cy
-    )
-    ctx.curve_to(
-        cx + belly_w, belly_cy + belly_h * kappa,
-        cx + belly_w * kappa, belly_cy + belly_h,
-        cx, belly_cy + belly_h
-    )
-    ctx.curve_to(
-        cx - belly_w * kappa, belly_cy + belly_h,
-        cx - belly_w, belly_cy + belly_h * kappa,
-        cx - belly_w, belly_cy
-    )
-    ctx.curve_to(
-        cx - belly_w, belly_cy - belly_h * kappa,
-        cx - belly_w * kappa, belly_cy - belly_h,
-        cx, belly_cy - belly_h
-    )
-    ctx.close_path()
+    draw_belly_oval(ctx, cx, belly_cy, belly_w, belly_h)
 
-    # Vertical gradient: warm white top → slightly shadowed bottom
+    # Yellow top → warm midtone → white bottom (matches PenguinMascot.swift exactly)
     pat = cairo.LinearGradient(cx, belly_cy - belly_h, cx, belly_cy + belly_h)
-    pat.add_color_stop_rgb(0.0, *BELLY_TOP)
-    pat.add_color_stop_rgb(0.7, *BELLY_TOP)
-    pat.add_color_stop_rgb(1.0, *BELLY_BOTTOM)
+    pat.add_color_stop_rgb(0.0,  *BELLY_YELLOW)   # #FFE066
+    pat.add_color_stop_rgb(0.30, *BELLY_WARM)      # #FFF0B0
+    pat.add_color_stop_rgb(0.65, *BELLY_TOP)       # #F5F5F7
+    pat.add_color_stop_rgb(1.0,  *BELLY_BOTTOM)    # #E8E8EC
     ctx.set_source(pat)
     ctx.fill()
+
+    # Specular highlight — top-left key light sheen
+    draw_belly_oval(ctx, cx, belly_cy, belly_w, belly_h)
+    shine = cairo.RadialGradient(
+        cx - belly_w * 0.35, belly_cy - belly_h * 0.35, 0,
+        cx - belly_w * 0.35, belly_cy - belly_h * 0.35, belly_w * 0.5
+    )
+    shine.add_color_stop_rgba(0.0, 1, 1, 1, 0.20)
+    shine.add_color_stop_rgba(1.0, 1, 1, 1, 0.0)
+    ctx.set_source(shine)
+    ctx.fill()
+
+    # Belly button — ∩ arc (upside-down U navel), matching SwiftUI version
+    r = psize * 0.028
+    btn_y = belly_cy + belly_h * 0.30
+    ctx.new_path()
+    ctx.move_to(cx - r, btn_y)
+    ctx.curve_to(cx - r * 0.6, btn_y - r * 1.3, cx + r * 0.6, btn_y - r * 1.3, cx + r, btn_y)
+    ctx.set_source_rgba(0, 0, 0, 0.18)
+    ctx.set_line_width(psize * 0.008)
+    ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+    ctx.stroke()
 
 
 def draw_head(ctx, cx, cy, psize, shadow=False):
@@ -513,13 +526,14 @@ def draw_feet(ctx, cx, cy, psize):
 
 
 def draw_penguin_full(ctx, variant="dark"):
-    """Draw the complete penguin character."""
+    """Draw the complete penguin character — zoomed-in bust composition."""
     cx = RENDER_SIZE / 2
-    cy = RENDER_SIZE / 2 + s(15)  # slightly below center
-    psize = s(680)  # reference size
+    # Shift down so belly fills frame nicely; feet crop naturally at bottom
+    cy = RENDER_SIZE / 2 + s(55)
+    # 29% bigger than v1 (880 vs 680) → bust portrait, head prominent
+    psize = s(880)
 
     if variant == "tinted":
-        # Solid white silhouette — all parts in white
         draw_tinted_silhouette(ctx, cx, cy, psize)
         return
 
@@ -529,12 +543,12 @@ def draw_penguin_full(ctx, variant="dark"):
         draw_head(c, cx, cy, psize, shadow=True)
     draw_drop_shadow(ctx, shadow_func)
 
-    # Draw order (back to front):
+    # Draw order (back to front) — no scarf, matching new in-app Nudgy:
     draw_feet(ctx, cx, cy, psize)
     draw_body_shape(ctx, cx, cy, psize)
     draw_belly(ctx, cx, cy, psize)
     draw_wings(ctx, cx, cy, psize)
-    draw_scarf(ctx, cx, cy, psize)
+    # draw_scarf removed — new Nudgy has no scarf
     draw_head(ctx, cx, cy, psize)
     draw_face_patch(ctx, cx, cy, psize)
     draw_cheek_blush(ctx, cx, cy, psize)
@@ -543,39 +557,23 @@ def draw_penguin_full(ctx, variant="dark"):
 
 
 def draw_tinted_silhouette(ctx, cx, cy, psize):
-    """White silhouette for tinted icon variant."""
+    """White silhouette for tinted icon variant — no scarf."""
     ctx.set_source_rgb(1, 1, 1)
 
     # Body
-    draw_body_shape(ctx, cx, cy, psize, shadow=True)  # reuse shadow path (just fills)
+    draw_body_shape(ctx, cx, cy, psize, shadow=True)
     # Head
     draw_head(ctx, cx, cy, psize, shadow=True)
     # Wings
     draw_wings(ctx, cx, cy, psize, shadow=True)
-    # Feet
+    # Feet (may be cropped by canvas at zoom level — that's fine)
     foot_bottom = cy + psize * 0.50
     foot_w = psize * 0.065
-    foot_h = psize * 0.025
     foot_spacing = psize * 0.08
     for side2 in [-1, 1]:
         ctx.new_path()
         ctx.arc(cx + side2 * foot_spacing, foot_bottom, foot_w, 0, 2 * math.pi)
         ctx.fill()
-    # Scarf tail suggestion
-    scarf_y = cy - psize * 0.065
-    ctx.new_path()
-    ctx.move_to(cx - psize * 0.30, scarf_y)
-    ctx.curve_to(cx - psize * 0.15, scarf_y - psize * 0.04,
-                 cx + psize * 0.15, scarf_y - psize * 0.04,
-                 cx + psize * 0.30, scarf_y)
-    ctx.curve_to(cx + psize * 0.32, scarf_y + psize * 0.04,
-                 cx + psize * 0.28, scarf_y + psize * 0.12,
-                 cx + psize * 0.18, scarf_y + psize * 0.15)
-    ctx.curve_to(cx + psize * 0.14, scarf_y + psize * 0.08,
-                 cx + psize * 0.08, scarf_y + psize * 0.04,
-                 cx - psize * 0.30, scarf_y)
-    ctx.close_path()
-    ctx.fill()
 
 
 def downsample(surface, from_size, to_size):

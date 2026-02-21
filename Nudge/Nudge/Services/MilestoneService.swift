@@ -44,61 +44,61 @@ enum MilestoneService {
     }
     
     /// Get celebration message for a milestone
-    static func message(for milestone: Int) -> (title: String, subtitle: String, emoji: String) {
+    static func message(for milestone: Int) -> (title: String, subtitle: String, icon: String) {
         switch milestone {
         case 10:
             return (
-                String(localized: "First 10! 🎉"),
+                String(localized: "First 10!"),
                 String(localized: "You've completed 10 tasks. That's real momentum!"),
-                "🔥"
+                "flame.fill"
             )
         case 25:
             return (
-                String(localized: "Quarter Century! 🌟"),
+                String(localized: "Quarter Century!"),
                 String(localized: "25 tasks done. You're building a serious habit."),
-                "⭐"
+                "star.fill"
             )
         case 50:
             return (
-                String(localized: "Half a Hundred! 🎯"),
+                String(localized: "Half a Hundred!"),
                 String(localized: "50 tasks conquered. You're unstoppable."),
-                "💫"
+                "sparkles"
             )
         case 100:
             return (
-                String(localized: "TRIPLE DIGITS! 🏆"),
+                String(localized: "TRIPLE DIGITS!"),
                 String(localized: "100 tasks. Let that sink in. You. Are. Incredible."),
-                "🏆"
+                "trophy.fill"
             )
         case 250:
             return (
-                String(localized: "250 Strong! 💎"),
+                String(localized: "250 Strong!"),
                 String(localized: "A quarter thousand. Most people never get here."),
-                "💎"
+                "diamond.fill"
             )
         case 500:
             return (
-                String(localized: "Five Hundred! 🚀"),
+                String(localized: "Five Hundred!"),
                 String(localized: "500 tasks. You've changed your life."),
-                "🚀"
+                "bolt.fill"
             )
         case 1000:
             return (
-                String(localized: "ONE THOUSAND! 👑"),
+                String(localized: "ONE THOUSAND!"),
                 String(localized: "You've completed 1,000 tasks. Legend status achieved."),
-                "👑"
+                "crown.fill"
             )
         default:
             return (
-                String(localized: "Milestone! 🎉"),
+                String(localized: "Milestone!"),
                 String(localized: "\(milestone) tasks completed!"),
-                "🎉"
+                "party.popper.fill"
             )
         }
     }
     
-    /// Snowflake bonus for reaching a milestone
-    static func bonusSnowflakes(for milestone: Int) -> Int {
+    /// Fish bonus for reaching a milestone
+    static func bonusFish(for milestone: Int) -> Int {
         switch milestone {
         case 10: return 10
         case 25: return 20

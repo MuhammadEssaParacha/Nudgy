@@ -9,9 +9,10 @@
 //  Called from NudgeApp.onForeground() and after data changes.
 //
 
-import CoreSpotlight
+@preconcurrency import CoreSpotlight
 import MobileCoreServices
 import Foundation
+import os
 
 /// Indexes NudgeItem tasks in Core Spotlight for system search.
 enum SpotlightIndexer {
@@ -50,20 +51,14 @@ enum SpotlightIndexer {
         // Delete old index, then add new
         CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: [domainIdentifier]) { error in
             if let error {
-                #if DEBUG
-                print("⚠️ Spotlight delete error: \(error)")
-                #endif
+                Log.services.warning("Spotlight delete error: \(error, privacy: .public)")
             }
             
             CSSearchableIndex.default().indexSearchableItems(searchableItems) { error in
                 if let error {
-                    #if DEBUG
-                    print("⚠️ Spotlight index error: \(error)")
-                    #endif
+                    Log.services.warning("Spotlight index error: \(error, privacy: .public)")
                 } else {
-                    #if DEBUG
-                    print("🔍 Spotlight: indexed \(searchableItems.count) tasks")
-                    #endif
+                    Log.services.debug("Spotlight: indexed \(searchableItems.count) tasks")
                 }
             }
         }
@@ -87,6 +82,12 @@ enum SpotlightIndexer {
     
     private static func buildDescription(for item: NudgeItem) -> String {
         var parts: [String] = []
+        
+        // Category label
+        let cat = item.resolvedCategory
+        if cat != .general {
+            parts.append("\(cat.emoji) \(cat.label)")
+        }
         
         if let contact = item.contactName, !contact.isEmpty {
             parts.append(contact)
@@ -115,6 +116,12 @@ enum SpotlightIndexer {
         }
         if let actionType = item.actionType {
             keywords.append(actionType.label)
+        }
+        
+        // Category keyword for searching
+        let cat = item.resolvedCategory
+        if cat != .general {
+            keywords.append(cat.label)
         }
         
         keywords.append("nudge")

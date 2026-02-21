@@ -43,7 +43,7 @@ struct CatchCeremonyOverlay: View {
     @State private var labelOffset: CGFloat = 20
     @State private var overlayOpacity: Double = 0
     @State private var particles: [CeremonyParticle] = []
-    @State private var snowflakeScale: CGFloat = 0
+    @State private var fishBadgeScale: CGFloat = 0
     @State private var viewSize: CGSize = .init(width: 390, height: 844)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -213,23 +213,24 @@ struct CatchCeremonyOverlay: View {
 
     private var rewardLabel: some View {
         VStack(spacing: DesignTokens.spacingSM) {
-            // Species emoji large
-            Text(fishCatch.species.emoji)
-                .font(.system(size: 52))
+            // Species icon large
+            Image(systemName: fishCatch.species.icon)
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(Color(hex: fishCatch.species.glowColorHex))
 
             Text(String(localized: "You caught a \(fishCatch.species.label)!"))
                 .font(.system(size: 18, weight: .bold, design: .rounded))
                 .foregroundStyle(DesignTokens.textPrimary)
 
-            // Snowflake reward badge
+            // Fish reward badge
             HStack(spacing: 6) {
-                Image(systemName: "snowflake")
+                Image(systemName: "fish.fill")
                     .font(.system(size: 14, weight: .semibold))
-                Text("+\(fishCatch.species.snowflakeValue)")
+                Text("+\(fishCatch.species.fishValue)")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
             }
             .foregroundStyle(Color(hex: "4FC3F7"))
-            .scaleEffect(snowflakeScale)
+            .scaleEffect(fishBadgeScale)
         }
         .opacity(labelOpacity)
         .offset(y: labelOffset)
@@ -286,9 +287,9 @@ struct CatchCeremonyOverlay: View {
                 labelOffset = 0
             }
 
-            // Snowflake badge pops
+            // Fish badge pops
             withAnimation(.spring(response: 0.3, dampingFraction: 0.5).delay(0.35)) {
-                snowflakeScale = 1.0
+                fishBadgeScale = 1.0
             }
 
             // Fade splash rings
@@ -384,20 +385,19 @@ struct CatchCeremonyOverlay: View {
         withAnimation(.easeInOut(duration: 0.12)) {
             fishWiggle = 14
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.12))
             guard self.phase == .hooked || self.phase == .reeling else { return }
             withAnimation(.easeInOut(duration: 0.12)) {
                 fishWiggle = -14
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                guard self.phase == .hooked || self.phase == .reeling else { return }
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    fishWiggle = 0
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    startWiggle()
-                }
+            try? await Task.sleep(for: .seconds(0.12))
+            guard self.phase == .hooked || self.phase == .reeling else { return }
+            withAnimation(.easeInOut(duration: 0.12)) {
+                fishWiggle = 0
             }
+            try? await Task.sleep(for: .seconds(0.25))
+            startWiggle()
         }
     }
 

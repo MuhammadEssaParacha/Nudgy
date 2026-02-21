@@ -17,7 +17,11 @@ struct NudgesEmptyState: View {
     
     let variant: EmptyVariant
     let snoozedCount: Int
-    let lastSnowflakesEarned: Int
+    let lastFishEarned: Int
+    /// Phase 7: Per-category completion counts for the "all clear" recap
+    var categoryRecap: [(icon: String, label: String, color: Color, count: Int)] = []
+    /// Callback to wake the oldest snoozed task
+    var onWakeSnooze: (() -> Void)?
     
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -32,14 +36,17 @@ struct NudgesEmptyState: View {
         VStack(spacing: DesignTokens.spacingXL) {
             Spacer()
             
-            switch variant {
-            case .allClear:
-                allClearView
-            case .allSnoozed:
-                allSnoozedView
-            case .noTasks:
-                noTasksView
+            Group {
+                switch variant {
+                case .allClear:
+                    allClearView
+                case .allSnoozed:
+                    allSnoozedView
+                case .noTasks:
+                    noTasksView
+                }
             }
+            .animation(reduceMotion ? .none : AnimationConstants.springSmooth, value: snoozedCount)
             
             Spacer()
         }
@@ -57,58 +64,42 @@ struct NudgesEmptyState: View {
     
     private var allClearView: some View {
         VStack(spacing: DesignTokens.spacingLG) {
-            // Whale emoji — big celebration
-            Text("🐋")
-                .font(AppTheme.emoji(size: 64))
+            // Whale icon — big celebration
+            Image(systemName: "whale.fill")
+                .font(.system(size: 52, weight: .bold))
+                .foregroundStyle(DesignTokens.accentComplete)
             
             VStack(spacing: DesignTokens.spacingSM) {
                 Text(String(localized: "All clear!"))
                     .font(AppTheme.headline)
                     .foregroundStyle(DesignTokens.textPrimary)
                 
-                Text(String(localized: "You've caught a rare whale · +15❄️"))
+                Text(String(localized: "You've caught a rare whale"))
                     .font(AppTheme.body)
                     .foregroundStyle(DesignTokens.goldCurrency)
+                
+                // Phase 7: Category recap chips
+                if !categoryRecap.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(categoryRecap.prefix(5), id: \.label) { cat in
+                            HStack(spacing: 2) {
+                                Image(systemName: cat.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("×\(cat.count)")
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(cat.color.opacity(0.85))
+                        }
+                    }
+                    .padding(.top, 2)
+                }
             }
             
-            // Action buttons
-            HStack(spacing: DesignTokens.spacingMD) {
-                Button {
-                    NotificationCenter.default.post(name: .nudgeOpenChat, object: nil)
-                } label: {
-                    HStack(spacing: DesignTokens.spacingSM) {
-                        Image(systemName: "bubble.left.fill")
-                        Text(String(localized: "Feed Nudgy 🐧"))
-                    }
-                    .font(AppTheme.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, DesignTokens.spacingXL)
-                    .padding(.vertical, DesignTokens.spacingMD)
-                    .background {
-                        Capsule().fill(DesignTokens.accentComplete.opacity(0.2))
-                    }
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    NotificationCenter.default.post(name: .nudgeOpenBrainDump, object: nil)
-                } label: {
-                    HStack(spacing: DesignTokens.spacingSM) {
-                        Image(systemName: "brain.fill")
-                        Text(String(localized: "Brain Dump"))
-                    }
-                    .font(AppTheme.body.weight(.semibold))
-                    .foregroundStyle(DesignTokens.accentActive)
-                    .padding(.horizontal, DesignTokens.spacingLG)
-                    .padding(.vertical, DesignTokens.spacingMD)
-                    .background {
-                        Capsule().fill(DesignTokens.accentActive.opacity(0.08))
-                    }
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
-                .buttonStyle(.plain)
-            }
+            // Hint to use the capture bar at the bottom
+            Text(String(localized: "Type below to add more"))
+                .font(AppTheme.caption)
+                .foregroundStyle(DesignTokens.textTertiary)
+                .padding(.top, DesignTokens.spacingXS)
         }
     }
     
@@ -123,7 +114,7 @@ struct NudgesEmptyState: View {
             )
             
             VStack(spacing: DesignTokens.spacingSM) {
-                Text(String(localized: "Everything's sleeping 💤"))
+                Text(String(localized: "Everything's sleeping"))
                     .font(AppTheme.headline)
                     .foregroundStyle(DesignTokens.textPrimary)
                 
@@ -135,24 +126,30 @@ struct NudgesEmptyState: View {
                     .multilineTextAlignment(.center)
             }
             
-            HStack(spacing: DesignTokens.spacingMD) {
+            if let onWake = onWakeSnooze {
                 Button {
-                    NotificationCenter.default.post(name: .nudgeOpenQuickAdd, object: nil)
+                    HapticService.shared.actionButtonTap()
+                    onWake()
                 } label: {
                     HStack(spacing: DesignTokens.spacingSM) {
-                        Image(systemName: "plus.circle.fill")
-                        Text(String(localized: "Add New"))
+                        Image(systemName: "alarm.fill")
+                        Text(String(localized: "Wake One Up"))
                     }
                     .font(AppTheme.body.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, DesignTokens.spacingXL)
                     .padding(.vertical, DesignTokens.spacingMD)
                     .background {
-                        Capsule().fill(DesignTokens.accentActive.opacity(0.2))
+                        Capsule().fill(DesignTokens.accentStale.opacity(0.25))
                     }
                     .glassEffect(.regular.interactive(), in: .capsule)
                 }
                 .buttonStyle(.plain)
+                .nudgeAccessibility(
+                    label: String(localized: "Wake One Up"),
+                    hint: String(localized: "Bring back the oldest snoozed task"),
+                    traits: .isButton
+                )
             }
         }
     }
@@ -179,43 +176,11 @@ struct NudgesEmptyState: View {
                     .padding(.horizontal, DesignTokens.spacingXL)
             }
             
-            HStack(spacing: DesignTokens.spacingMD) {
-                Button {
-                    NotificationCenter.default.post(name: .nudgeOpenChat, object: nil)
-                } label: {
-                    HStack(spacing: DesignTokens.spacingSM) {
-                        Image(systemName: "bubble.left.fill")
-                        Text(String(localized: "Talk to Nudgy"))
-                    }
-                    .font(AppTheme.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, DesignTokens.spacingXL)
-                    .padding(.vertical, DesignTokens.spacingMD)
-                    .background {
-                        Capsule().fill(DesignTokens.accentActive.opacity(0.2))
-                    }
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    NotificationCenter.default.post(name: .nudgeOpenQuickAdd, object: nil)
-                } label: {
-                    HStack(spacing: DesignTokens.spacingXS) {
-                        Image(systemName: "plus")
-                        Text(String(localized: "Add"))
-                    }
-                    .font(AppTheme.body.weight(.semibold))
-                    .foregroundStyle(DesignTokens.accentActive)
-                    .padding(.horizontal, DesignTokens.spacingLG)
-                    .padding(.vertical, DesignTokens.spacingMD)
-                    .background {
-                        Capsule().fill(DesignTokens.accentActive.opacity(0.08))
-                    }
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
-                .buttonStyle(.plain)
-            }
+            // Hint to use the capture bar at the bottom
+            Text(String(localized: "Type below to add your first nudge"))
+                .font(AppTheme.caption)
+                .foregroundStyle(DesignTokens.textTertiary)
+                .padding(.top, DesignTokens.spacingXS)
         }
     }
     
@@ -246,10 +211,10 @@ struct NudgesEmptyState: View {
     
     private var emptyViewTitle: String {
         switch DayPeriod.current {
-        case .morning:   return String(localized: "Good morning! 🌅")
-        case .afternoon: return String(localized: "Quiet afternoon 🌤️")
-        case .evening:   return String(localized: "Winding down 🌙")
-        case .night:     return String(localized: "Nothing on your plate 🐧")
+        case .morning:   return String(localized: "Good morning!")
+        case .afternoon: return String(localized: "Quiet afternoon")
+        case .evening:   return String(localized: "Winding down")
+        case .night:     return String(localized: "Nothing on your plate")
         }
     }
     
@@ -275,7 +240,7 @@ struct NudgesEmptyState: View {
         NudgesEmptyState(
             variant: .allClear,
             snoozedCount: 0,
-            lastSnowflakesEarned: 15
+            lastFishEarned: 15
         )
     }
     .preferredColorScheme(.dark)

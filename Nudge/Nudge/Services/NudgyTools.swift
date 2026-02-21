@@ -148,8 +148,7 @@ struct TimeContextTool: Tool {
     
     func call(arguments: Arguments) async throws -> String {
         let now = Date()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
+        let timeString = now.formatted(.dateTime.weekday(.wide).month(.wide).day().year().hour().minute())
         let hour = Calendar.current.component(.hour, from: now)
         
         let period: String
@@ -160,7 +159,7 @@ struct TimeContextTool: Tool {
         default: period = "late night"
         }
         
-        return "\(formatter.string(from: now)). It's \(period)."
+        return "\(timeString). It's \(period)."
     }
 }
 

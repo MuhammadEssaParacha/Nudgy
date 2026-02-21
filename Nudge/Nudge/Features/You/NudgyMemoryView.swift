@@ -45,6 +45,7 @@ struct NudgyMemoryView: View {
                     TextField(String(localized: "Search memories..."), text: $searchText)
                         .font(AppTheme.body)
                         .foregroundStyle(DesignTokens.textPrimary)
+                        .submitLabel(.search)
                 }
                 .padding(DesignTokens.spacingMD)
                 .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusCard))
@@ -70,6 +71,7 @@ struct NudgyMemoryView: View {
             .padding(.top, DesignTokens.spacingSM)
             .padding(.bottom, 100)
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Color.black.ignoresSafeArea())
         .navigationTitle(String(localized: "Nudgy's Memory"))
         .navigationBarTitleDisplayMode(.large)

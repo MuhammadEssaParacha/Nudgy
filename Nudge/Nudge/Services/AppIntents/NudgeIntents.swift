@@ -34,6 +34,9 @@ struct AddTaskIntent: AppIntent {
     @Parameter(title: "What do you need to do?")
     var content: String
     
+    @Parameter(title: "Category", default: nil)
+    var category: TaskCategoryAppEnum?
+    
     static var parameterSummary: some ParameterSummary {
         Summary("Add \(\.$content) to Nudge")
     }
@@ -46,7 +49,14 @@ struct AddTaskIntent: AppIntent {
         
         let context = container.mainContext
         let repository = NudgeRepository(modelContext: context)
-        let item = repository.createManual(content: content)
+        let resolvedCat = category?.toTaskCategory
+        let item = repository.createManualWithDetails(
+            content: content,
+            emoji: nil,
+            actionType: nil,
+            contactName: nil,
+            category: resolvedCat
+        )
         
         let entity = NudgeTaskEntity(from: item)
         
@@ -293,7 +303,7 @@ enum NudgeScreen: String, AppEnum {
     static var caseDisplayRepresentations: [NudgeScreen: DisplayRepresentation] = [
         .nudges: "Nudges",
         .chat: "Chat with Nudgy",
-        .brainDump: "Brain Dump",
+        .brainDump: "Unload",
         .quickAdd: "Quick Add",
         .settings: "Settings"
     ]
@@ -321,6 +331,95 @@ enum NudgeIntentError: Error, CustomLocalizedStringResourceConvertible {
             return "Please sign in to Nudge first."
         case .taskNotFound:
             return "That task couldn't be found."
+        }
+    }
+}
+
+// MARK: - Task Category App Enum
+
+/// AppEnum mirroring TaskCategory for Shortcuts/Siri parameter resolution.
+enum TaskCategoryAppEnum: String, AppEnum {
+    case call, text, email, link
+    case homework, cooking, alarm, exercise
+    case cleaning, shopping, appointment, finance
+    case health, creative, errand, selfCare
+    case work, social, maintenance, general
+    
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Category"
+    
+    static var caseDisplayRepresentations: [TaskCategoryAppEnum: DisplayRepresentation] = [
+        .call: DisplayRepresentation(title: "Call", subtitle: "📞"),
+        .text: DisplayRepresentation(title: "Text", subtitle: "💬"),
+        .email: DisplayRepresentation(title: "Email", subtitle: "📧"),
+        .link: DisplayRepresentation(title: "Link", subtitle: "🔗"),
+        .homework: DisplayRepresentation(title: "Study", subtitle: "📚"),
+        .cooking: DisplayRepresentation(title: "Cooking", subtitle: "🍳"),
+        .alarm: DisplayRepresentation(title: "Alarm", subtitle: "⏰"),
+        .exercise: DisplayRepresentation(title: "Exercise", subtitle: "💪"),
+        .cleaning: DisplayRepresentation(title: "Cleaning", subtitle: "🧹"),
+        .shopping: DisplayRepresentation(title: "Shopping", subtitle: "🛒"),
+        .appointment: DisplayRepresentation(title: "Appointment", subtitle: "📅"),
+        .finance: DisplayRepresentation(title: "Finance", subtitle: "💰"),
+        .health: DisplayRepresentation(title: "Health", subtitle: "💊"),
+        .creative: DisplayRepresentation(title: "Creative", subtitle: "🎨"),
+        .errand: DisplayRepresentation(title: "Errand", subtitle: "🏃"),
+        .selfCare: DisplayRepresentation(title: "Self-Care", subtitle: "🧘"),
+        .work: DisplayRepresentation(title: "Work", subtitle: "💼"),
+        .social: DisplayRepresentation(title: "Social", subtitle: "👥"),
+        .maintenance: DisplayRepresentation(title: "Fix & Build", subtitle: "🔧"),
+        .general: DisplayRepresentation(title: "General", subtitle: "📝")
+    ]
+    
+    /// Convert to the main app's TaskCategory enum.
+    var toTaskCategory: TaskCategory {
+        TaskCategory(rawValue: self.rawValue) ?? .general
+    }
+}
+
+// MARK: - Get Tasks By Category Intent
+
+/// Count and list tasks in a specific category — great for automations.
+struct GetTasksByCategoryIntent: AppIntent {
+    
+    static var title: LocalizedStringResource = "Get Nudges by Category"
+    static var description: IntentDescription = "Count and get tasks in a specific category."
+    
+    static var openAppWhenRun: Bool = false
+    
+    @Parameter(title: "Category")
+    var category: TaskCategoryAppEnum
+    
+    static var parameterSummary: some ParameterSummary {
+        Summary("Get \(\.$category) nudges")
+    }
+    
+    @MainActor
+    func perform() async throws -> some IntentResult & ReturnsValue<Int> & ProvidesDialog {
+        guard let container = IntentModelAccess.makeContainer() else {
+            throw NudgeIntentError.notSignedIn
+        }
+        
+        let context = container.mainContext
+        let catRaw = category.rawValue
+        let descriptor = FetchDescriptor<NudgeItem>(
+            predicate: #Predicate { $0.statusRaw == "active" },
+            sortBy: [SortDescriptor(\.sortOrder)]
+        )
+        
+        let items = (try? context.fetch(descriptor)) ?? []
+        let matching = items.filter { $0.categoryRaw == catRaw }
+        let count = matching.count
+        let cat = category.toTaskCategory
+        
+        if count == 0 {
+            return .result(value: 0, dialog: "No active \(cat.label) tasks.")
+        } else if let first = matching.first {
+            return .result(
+                value: count,
+                dialog: "\(count) \(cat.emoji) \(cat.label) task\(count == 1 ? "" : "s"). Next up: \(first.content)"
+            )
+        } else {
+            return .result(value: count, dialog: "\(count) \(cat.label) task\(count == 1 ? "" : "s").")
         }
     }
 }

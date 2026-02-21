@@ -10,12 +10,14 @@ import SwiftUI
 
 struct ShareExtensionView: View {
     let content: SharedContent
-    var onSave: (Date) -> Void
+    var onSave: (Date, String?) -> Void
     var onCancel: () -> Void
     
     @State private var selectedSnoozeDate = Date().addingTimeInterval(3 * 3600) // Default: 3 hours
     @State private var showCustomPicker = false
     @State private var saved = false
+    @State private var selectedCategory: String?
+    @State private var showCategoryOverride = false
     
     // Snooze presets
     private let presets: [(String, String, Date)] = [
@@ -95,6 +97,64 @@ struct ShareExtensionView: View {
                         .foregroundStyle(.white)
                         .lineLimit(3)
                 }
+                
+                // Category chip
+                let displayCat = selectedCategory ?? content.guessedCategory
+                if let catRaw = displayCat {
+                    HStack(spacing: 6) {
+                        Button {
+                            showCategoryOverride.toggle()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: ShareCategoryEmoji.icon(for: catRaw))
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Color(hex: ShareCategoryEmoji.colorHex(for: catRaw)))
+                                Text(ShareCategoryEmoji.label(for: catRaw))
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(Color(hex: "8E8E93"))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(Color(hex: ShareCategoryEmoji.colorHex(for: catRaw)).opacity(0.2))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, 4)
+                } else {
+                    Button {
+                        showCategoryOverride.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "tag")
+                                .font(.system(size: 11))
+                            Text(String(localized: "Add category"))
+                                .font(.system(size: 12, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundStyle(Color(hex: "8E8E93"))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.06))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                }
+                
+                // Category override grid
+                if showCategoryOverride {
+                    shareCategoryPicker
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
@@ -108,6 +168,7 @@ struct ShareExtensionView: View {
             )
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
+            .animation(.easeOut(duration: 0.2), value: showCategoryOverride)
             
             // Snooze section label
             Text(String(localized: "Remind me"))
@@ -242,11 +303,103 @@ struct ShareExtensionView: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             saved = true
         }
-        onSave(selectedSnoozeDate)
+        let finalCategory = selectedCategory ?? content.guessedCategory
+        onSave(selectedSnoozeDate, finalCategory)
+    }
+    // MARK: - Category Picker Grid (Lightweight — no main app dependencies)
+    
+    private var shareCategoryPicker: some View {
+        let cats = ShareCategoryEmoji.allCategories
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 6) {
+            ForEach(cats, id: \.raw) { cat in
+                let isSelected = (selectedCategory ?? content.guessedCategory) == cat.raw
+                Button {
+                    if selectedCategory == cat.raw {
+                        selectedCategory = nil
+                    } else {
+                        selectedCategory = cat.raw
+                    }
+                    let generator = UISelectionFeedbackGenerator()
+                    generator.selectionChanged()
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: cat.icon)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(isSelected ? .white : Color(hex: cat.colorHex))
+                        Text(cat.label)
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(isSelected ? .white : Color(hex: "8E8E93"))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isSelected
+                                  ? Color(hex: cat.colorHex).opacity(0.25)
+                                  : Color.white.opacity(0.04))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(isSelected ? Color(hex: cat.colorHex).opacity(0.5) : .clear, lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 4)
     }
 }
 
-// MARK: - Color Extension (Share Extension needs its own copy)
+// MARK: - Share Category Emoji Map (standalone for extension, mirrors main app TaskCategory)
+
+enum ShareCategoryEmoji {
+    struct CategoryInfo: Sendable {
+        let raw: String
+        let icon: String
+        let label: String
+        let colorHex: String
+    }
+    
+    static let allCategories: [CategoryInfo] = [
+        CategoryInfo(raw: "call", icon: "phone.fill", label: "Call", colorHex: "34C759"),
+        CategoryInfo(raw: "text", icon: "message.fill", label: "Text", colorHex: "5AC8FA"),
+        CategoryInfo(raw: "email", icon: "envelope.fill", label: "Email", colorHex: "007AFF"),
+        CategoryInfo(raw: "link", icon: "link", label: "Link", colorHex: "AF52DE"),
+        CategoryInfo(raw: "homework", icon: "book.fill", label: "Study", colorHex: "FFD60A"),
+        CategoryInfo(raw: "cooking", icon: "frying.pan.fill", label: "Cook", colorHex: "FF9F0A"),
+        CategoryInfo(raw: "alarm", icon: "alarm.fill", label: "Alarm", colorHex: "FF453A"),
+        CategoryInfo(raw: "exercise", icon: "dumbbell.fill", label: "Fitness", colorHex: "30D158"),
+        CategoryInfo(raw: "cleaning", icon: "bubbles.and.sparkles.fill", label: "Clean", colorHex: "66D4CF"),
+        CategoryInfo(raw: "shopping", icon: "cart.fill", label: "Shop", colorHex: "FF6482"),
+        CategoryInfo(raw: "appointment", icon: "calendar.badge.clock", label: "Appt", colorHex: "BF5AF2"),
+        CategoryInfo(raw: "finance", icon: "creditcard.fill", label: "Finance", colorHex: "FFD426"),
+        CategoryInfo(raw: "health", icon: "heart.fill", label: "Health", colorHex: "FF375F"),
+        CategoryInfo(raw: "creative", icon: "paintbrush.fill", label: "Create", colorHex: "FF9500"),
+        CategoryInfo(raw: "errand", icon: "car.fill", label: "Errand", colorHex: "64D2FF"),
+        CategoryInfo(raw: "selfCare", icon: "sparkles", label: "Self-Care", colorHex: "AC8E68"),
+        CategoryInfo(raw: "work", icon: "briefcase.fill", label: "Work", colorHex: "0A84FF"),
+        CategoryInfo(raw: "social", icon: "person.2.fill", label: "Social", colorHex: "FF6482"),
+        CategoryInfo(raw: "maintenance", icon: "wrench.and.screwdriver.fill", label: "Fix", colorHex: "8E8E93"),
+        CategoryInfo(raw: "general", icon: "pin.fill", label: "General", colorHex: "8E8E93"),
+    ]
+    
+    private static let lookup: [String: CategoryInfo] = {
+        Dictionary(uniqueKeysWithValues: allCategories.map { ($0.raw, $0) })
+    }()
+    
+    static func icon(for raw: String) -> String {
+        lookup[raw]?.icon ?? "pin.fill"
+    }
+    
+    static func label(for raw: String) -> String {
+        lookup[raw]?.label ?? "General"
+    }
+    
+    static func colorHex(for raw: String) -> String {
+        lookup[raw]?.colorHex ?? "8E8E93"
+    }
+}
 
 extension Color {
     init(hex: String) {

@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import TipKit
 import BackgroundTasks
+import os
 
 @main
 struct NudgeApp: App {
@@ -66,7 +67,10 @@ struct NudgeApp: App {
             .environment(authSession)
         }
         .backgroundTask(.appRefresh("com.tarsitgroup.nudge.liveActivityRefresh")) {
-            await handleLiveActivityRefresh()
+            await self.handleLiveActivityRefresh()
+        }
+        .backgroundTask(.appRefresh("com.tarsitgroup.nudge.smartReorder")) {
+            await self.handleSmartReorder()
         }
     }
 
@@ -152,6 +156,9 @@ struct NudgeApp: App {
 
         guard let container = activeModelContainer else { return }
 
+        // Process any pending widget actions (mark done / skip from widgets)
+        WidgetDataService.processPendingActions(using: container.mainContext)
+
         let repository = NudgeRepository(modelContext: container.mainContext)
         repository.ingestFromShareExtension()
         repository.resurfaceExpiredSnoozes()
@@ -166,11 +173,15 @@ struct NudgeApp: App {
             NotificationService.shared.scheduleStaleNotification(for: item, settings: appSettings)
         }
         
-        // Schedule end-of-day prompt if items remain
+        // Schedule end-of-day prompt if items remain (category-aware)
         NotificationService.shared.scheduleEndOfDayPrompt(
             remainingCount: activeItems.count,
-            settings: appSettings
+            settings: appSettings,
+            remainingItems: activeItems
         )
+        
+        // Backfill categories for tasks that don't have one yet
+        repository.backfillCategories()
         
         // Re-index tasks in Spotlight
         SpotlightIndexer.indexAllTasks(from: repository)
@@ -184,6 +195,22 @@ struct NudgeApp: App {
         // Schedule background refresh for Live Activity time-of-day updates
         if appSettings.liveActivityEnabled {
             scheduleLiveActivityRefresh()
+        }
+        
+        // Schedule overnight smart reorder
+        scheduleSmartReorder()
+        
+        // Refresh location for proximity-based task surfacing
+        if LocationService.shared.isEnabled && LocationService.shared.isAuthorized {
+            LocationService.shared.requestCurrentLocation()
+            // Re-register geofences with current active tasks
+            let locationTasks = activeItems.filter { $0.hasLocation }
+            LocationService.shared.monitorGeofences(for: locationTasks)
+        }
+        
+        // Refresh HealthKit step count for energy suggestions
+        if HealthService.shared.isEnabled {
+            Task { await HealthService.shared.refreshStepCount() }
         }
 
         Task { await syncEngine?.syncAll() }
@@ -200,9 +227,7 @@ struct NudgeApp: App {
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
-            #if DEBUG
-            print("⚠️ Could not schedule Live Activity refresh: \\(error)")
-            #endif
+            Log.app.warning("Could not schedule Live Activity refresh: \(error, privacy: .public)")
         }
     }
     
@@ -220,19 +245,107 @@ struct NudgeApp: App {
             let repository = NudgeRepository(modelContext: container.mainContext)
             if let nextItem = repository.fetchNextItem() {
                 let accentHex = AccentColorSystem.shared.hexString(for: nextItem.accentStatus)
-                manager.start(
+                let cat = nextItem.resolvedCategory
+                await manager.start(
                     taskContent: nextItem.content,
                     taskEmoji: nextItem.emoji ?? "pin.fill",
                     queuePosition: 1,
                     queueTotal: repository.fetchActiveQueue().count,
                     accentHex: accentHex,
-                    taskID: nextItem.id.uuidString
+                    taskID: nextItem.id.uuidString,
+                    categoryLabel: cat != .general ? cat.label : nil,
+                    categoryColorHex: cat != .general ? cat.primaryColorHex : nil
                 )
             }
         }
         
         // Re-schedule for next update
         scheduleLiveActivityRefresh()
+    }
+    
+    // MARK: - Smart Reorder (BGProcessingTask)
+    
+    /// Schedule overnight smart reorder — reorders tasks by priority, staleness,
+    /// due dates, and energy levels so the morning queue is optimized.
+    private func scheduleSmartReorder() {
+        let request = BGAppRefreshTaskRequest(identifier: "com.tarsitgroup.nudge.smartReorder")
+        // Schedule for early morning (5am-ish)
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month, .day], from: Date())
+        components.day! += 1
+        components.hour = 5
+        components.minute = 0
+        request.earliestBeginDate = calendar.date(from: components)
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            Log.app.warning("Could not schedule smart reorder: \(error, privacy: .public)")
+        }
+    }
+    
+    /// Handle overnight smart reorder — re-sort active tasks for optimal morning queue.
+    private func handleSmartReorder() async {
+        guard let container = activeModelContainer else { return }
+        
+        let context = container.mainContext
+        let repository = NudgeRepository(modelContext: context)
+        let activeQueue = repository.fetchActiveQueue()
+        
+        guard activeQueue.count >= 2 else {
+            scheduleSmartReorder()
+            return
+        }
+        
+        // Score and sort tasks for optimal ordering
+        let scored = activeQueue.map { item -> (NudgeItem, Double) in
+            var score: Double = 0
+            
+            // Due date urgency (higher score = more urgent)
+            if let dueDate = item.dueDate {
+                let hoursUntilDue = dueDate.timeIntervalSinceNow / 3600
+                if hoursUntilDue < 0 { score += 100 }       // Overdue
+                else if hoursUntilDue < 4 { score += 80 }    // Due today soon
+                else if hoursUntilDue < 24 { score += 50 }   // Due today
+                else if hoursUntilDue < 48 { score += 30 }   // Due tomorrow
+            }
+            
+            // Priority boost
+            switch item.priority {
+            case .high:   score += 40
+            case .medium: score += 20
+            case .low:    score += 5
+            case .none:   score += 10
+            }
+            
+            // Staleness penalty (old tasks should bubble up)
+            let ageDays = item.ageInDays
+            if ageDays >= 5 { score += 35 }
+            else if ageDays >= 3 { score += 20 }
+            else if ageDays >= 1 { score += 10 }
+            
+            // Energy-time alignment (morning = high energy)
+            if item.energyLevel == .high { score += 15 }
+            
+            // Actionable items get a small boost (they're concrete)
+            if item.hasAction { score += 10 }
+            
+            // Short tasks get a morning boost (quick wins)
+            if let est = item.estimatedMinutes, est <= 5 { score += 12 }
+            
+            return (item, score)
+        }
+        
+        let sorted = scored.sorted { $0.1 > $1.1 }
+        for (index, pair) in sorted.enumerated() {
+            pair.0.sortOrder = index
+        }
+        
+        try? context.save()
+        Log.app.info("Smart reorder: reordered \(sorted.count) tasks")
+        
+        // Re-schedule for tomorrow
+        scheduleSmartReorder()
     }
 
     // MARK: - Per-user activation
@@ -241,9 +354,7 @@ struct NudgeApp: App {
         guard !isActivating else { return }
         isActivating = true
         defer { isActivating = false }
-        #if DEBUG
-        print("🔑 activateUser: start — userID=\(user.userID), ck=\(user.cloudKitAvailable)")
-        #endif
+        Log.app.debug("activateUser: start — userID=\(user.userID, privacy: .public), ck=\(user.cloudKitAvailable)")
         // Apply per-user scoping.
         appSettings.activeUserID = user.userID
         if let name = user.displayName, !name.isEmpty {
@@ -252,6 +363,9 @@ struct NudgeApp: App {
         
         // Persist user ID for App Intents (out-of-process access)
         IntentModelAccess.setActiveUserID(user.userID)
+        
+        // Apply personalization collected during intro (before auth set activeUserID)
+        applyPendingIntroProfile()
         
         // Auto-complete onboarding for debug bypass
         #if DEBUG
@@ -264,30 +378,24 @@ struct NudgeApp: App {
         // Per-user memory storage.
         NudgyMemory.shared.setActiveUser(id: user.userID)
         NudgyEngine.shared.syncUserName(appSettings.userName)
-        #if DEBUG
-        print("🔑 activateUser: building container")
-        #endif
+        // Sync ADHD profile into all sub-engines now that user is active and scoped keys resolve
+        NudgyEngine.shared.syncADHDProfile(settings: appSettings)
+        Log.app.debug("activateUser: building container")
 
         // Build per-user container.
         let container = makePerUserModelContainer(userID: user.userID)
         activeModelContainer = container
-        #if DEBUG
-        print("🔑 activateUser: container ready, bootstrapping rewards")
-        #endif
+        Log.app.debug("activateUser: container ready, bootstrapping rewards")
 
         // Bootstrap reward system per user store.
         RewardService.shared.bootstrap(context: container.mainContext)
 
         // Create sync engine only when CloudKit is available
         if user.cloudKitAvailable {
-            #if DEBUG
-            print("🔑 activateUser: creating sync engine")
-            #endif
+            Log.app.debug("activateUser: creating sync engine")
             syncEngine = CloudKitSyncEngine(modelContext: container.mainContext, userID: user.userID)
         }
-        #if DEBUG
-        print("🔑 activateUser: ingesting share items")
-        #endif
+        Log.app.debug("activateUser: ingesting share items")
 
         // Ingest share items + resurface snoozes
         let repository = NudgeRepository(modelContext: container.mainContext)
@@ -311,9 +419,7 @@ struct NudgeApp: App {
         
         // Index tasks in Spotlight for system search
         SpotlightIndexer.indexAllTasks(from: repository)
-        #if DEBUG
-        print("🔑 activateUser: DONE")
-        #endif
+        Log.app.debug("activateUser: DONE")
     }
 
     private func makePerUserModelContainer(userID: String) -> ModelContainer {
@@ -343,17 +449,76 @@ struct NudgeApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
         } catch {
-            print("⚠️ Per-user store failed — falling back to in-memory: \(error)")
-            let fallback = ModelConfiguration(
-                "nudge_fallback",
-                schema: schema,
-                isStoredInMemoryOnly: true,
-                cloudKitDatabase: .none
-            )
-            return (try? ModelContainer(for: schema, configurations: [fallback])) ?? {
-                fatalError("Could not create in-memory ModelContainer")
-            }()
+            Log.app.error("Per-user store failed — falling back to in-memory: \(error, privacy: .public)")
+            // Attempt in-memory fallback; if that also fails, delete the corrupt
+            // store file and retry once before giving up with an empty container.
+            do {
+                let fallback = ModelConfiguration(
+                    "nudge_fallback",
+                    schema: schema,
+                    isStoredInMemoryOnly: true,
+                    cloudKitDatabase: .none
+                )
+                return try ModelContainer(for: schema, configurations: [fallback])
+            } catch {
+                Log.app.fault("In-memory ModelContainer also failed: \(error, privacy: .public)")
+                // Last resort — nuke corrupt store and create fresh on-disk
+                try? FileManager.default.removeItem(at: storeURL)
+                let freshConfig = ModelConfiguration(
+                    "nudge_\(userID)",
+                    schema: schema,
+                    url: storeURL,
+                    cloudKitDatabase: .none
+                )
+                do {
+                    return try ModelContainer(for: schema, configurations: [freshConfig])
+                } catch {
+                    Log.app.fault("Cannot create any ModelContainer: \(error, privacy: .public)")
+                    // Return an in-memory container with minimal config — never crash
+                    let emergency = ModelConfiguration(isStoredInMemoryOnly: true)
+                    return try! ModelContainer(for: schema, configurations: [emergency])
+                }
+            }
         }
+    }
+    
+    // MARK: - Pending Intro Profile
+    
+    /// Apply personalization choices collected during the intro journey.
+    /// Reads from non-scoped UserDefaults keys, writes to scoped AppSettings.
+    /// If no pending profile exists (e.g. user skipped or used old intro), this is a no-op
+    /// and the user will see OnboardingView as a fallback.
+    private func applyPendingIntroProfile() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "pendingProfileFromIntro") else { return }
+        
+        if let name = defaults.string(forKey: "pendingProfileName"), !name.isEmpty {
+            appSettings.userName = name
+        }
+        if let ageRaw = defaults.string(forKey: "pendingProfileAge"),
+           let age = AgeGroup(rawValue: ageRaw) {
+            appSettings.ageGroup = age
+        }
+        if let challengeRaw = defaults.string(forKey: "pendingProfileChallenge"),
+           let challenge = ADHDChallenge(rawValue: challengeRaw) {
+            appSettings.adhdBiggestChallenge = challenge
+        }
+        if let modeRaw = defaults.string(forKey: "pendingProfileMode"),
+           let mode = NudgyPersonalityMode(rawValue: modeRaw) {
+            appSettings.nudgyPersonalityMode = mode
+        }
+        
+        appSettings.hasCompletedADHDProfile = true
+        appSettings.hasCompletedOnboarding = true
+        
+        // Clean up pending keys
+        defaults.removeObject(forKey: "pendingProfileFromIntro")
+        defaults.removeObject(forKey: "pendingProfileName")
+        defaults.removeObject(forKey: "pendingProfileAge")
+        defaults.removeObject(forKey: "pendingProfileChallenge")
+        defaults.removeObject(forKey: "pendingProfileMode")
+        
+        Log.app.debug("applyPendingIntroProfile: applied personalization from intro")
     }
     
     // MARK: - Comprehensive Test Data
@@ -879,15 +1044,12 @@ struct NudgeApp: App {
         )
         context.insert(eveningRoutine)
         
-        try? context.save()
-        print("[SEED] DEBUG: Seeded 30 test tasks + 2 routines across all categories")
-        print("   [SEED] Action types: CALL, TEXT, EMAIL, LINK, SEARCH, NAVIGATE, CALENDAR")
-        print("   [SEED] Time horizons: today, tomorrow, this week, later, snoozed, done")
-        print("   [SEED] States: active, stale, overdue-snoozed, done, dropped")
-        print("   [SEED] Drafts: 4 items with AI drafts (text, email, follow-up, done)")
-        print("   [SEED] Contacts: 6 items with contact names")
-        print("   [SEED] Energy: low, medium, high across items")
-        print("   [SEED] Routines: Morning (weekdays) + Wind-Down (daily)")
+        do {
+            try context.save()
+        } catch {
+            Log.app.error("[SEED] Failed to save test data: \(error, privacy: .public)")
+        }
+        Log.app.debug("Seeded 30 test tasks + 2 routines")
     }
     #endif
 }

@@ -43,7 +43,7 @@ final class AppSettings {
     // MARK: - Live Activity
     
     var liveActivityEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "liveActivityEnabled") }
+        get { UserDefaults.standard.object(forKey: "liveActivityEnabled") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "liveActivityEnabled") }
     }
     
@@ -154,20 +154,6 @@ final class AppSettings {
         }
     }
     
-    /// User persona for personality adaptation (ADHD, Professional, Student, Parent, Creative)
-    var selectedPersona: UserPersona {
-        get {
-            access(keyPath: \.selectedPersona)
-            let raw = UserDefaults.standard.string(forKey: scopedKey("selectedPersona")) ?? UserPersona.adhd.rawValue
-            return UserPersona(rawValue: raw) ?? .adhd
-        }
-        set {
-            withMutation(keyPath: \.selectedPersona) {
-                UserDefaults.standard.set(newValue.rawValue, forKey: scopedKey("selectedPersona"))
-            }
-        }
-    }
-    
     // MARK: - Onboarding
     
     /// Global flag — shown before auth. Not user-scoped.
@@ -193,6 +179,126 @@ final class AppSettings {
                 UserDefaults.standard.set(newValue, forKey: scopedKey("hasCompletedOnboarding"))
             }
         }
+    }
+    
+    // MARK: - ADHD Profile
+
+    var ageGroup: AgeGroup {
+        get {
+            access(keyPath: \.ageGroup)
+            let raw = UserDefaults.standard.string(forKey: scopedKey("ageGroup")) ?? AgeGroup.adult.rawValue
+            return AgeGroup(rawValue: raw) ?? .adult
+        }
+        set {
+            withMutation(keyPath: \.ageGroup) {
+                UserDefaults.standard.set(newValue.rawValue, forKey: scopedKey("ageGroup"))
+            }
+        }
+    }
+
+    var adhdSubtype: ADHDSubtype {
+        get {
+            access(keyPath: \.adhdSubtype)
+            let raw = UserDefaults.standard.string(forKey: scopedKey("adhdSubtype")) ?? ADHDSubtype.unsure.rawValue
+            return ADHDSubtype(rawValue: raw) ?? .unsure
+        }
+        set {
+            withMutation(keyPath: \.adhdSubtype) {
+                UserDefaults.standard.set(newValue.rawValue, forKey: scopedKey("adhdSubtype"))
+            }
+        }
+    }
+
+    var adhdBiggestChallenge: ADHDChallenge {
+        get {
+            access(keyPath: \.adhdBiggestChallenge)
+            let raw = UserDefaults.standard.string(forKey: scopedKey("adhdBiggestChallenge")) ?? ADHDChallenge.allOfAbove.rawValue
+            return ADHDChallenge(rawValue: raw) ?? .allOfAbove
+        }
+        set {
+            withMutation(keyPath: \.adhdBiggestChallenge) {
+                UserDefaults.standard.set(newValue.rawValue, forKey: scopedKey("adhdBiggestChallenge"))
+            }
+        }
+    }
+
+    var nudgyPersonalityMode: NudgyPersonalityMode {
+        get {
+            access(keyPath: \.nudgyPersonalityMode)
+            let raw = UserDefaults.standard.string(forKey: scopedKey("nudgyPersonalityMode")) ?? NudgyPersonalityMode.gentle.rawValue
+            return NudgyPersonalityMode(rawValue: raw) ?? .gentle
+        }
+        set {
+            withMutation(keyPath: \.nudgyPersonalityMode) {
+                UserDefaults.standard.set(newValue.rawValue, forKey: scopedKey("nudgyPersonalityMode"))
+            }
+        }
+    }
+
+    var hasCompletedADHDProfile: Bool {
+        get { access(keyPath: \.hasCompletedADHDProfile); return UserDefaults.standard.bool(forKey: scopedKey("hasCompletedADHDProfile")) }
+        set { withMutation(keyPath: \.hasCompletedADHDProfile) { UserDefaults.standard.set(newValue, forKey: scopedKey("hasCompletedADHDProfile")) } }
+    }
+
+    // MARK: - Medication Awareness
+
+    var medicationEnabled: Bool {
+        get {
+            access(keyPath: \.medicationEnabled)
+            return UserDefaults.standard.bool(forKey: scopedKey("medicationEnabled"))
+        }
+        set {
+            withMutation(keyPath: \.medicationEnabled) {
+                UserDefaults.standard.set(newValue, forKey: scopedKey("medicationEnabled"))
+            }
+        }
+    }
+
+    var medicationTime: Date {
+        get {
+            access(keyPath: \.medicationTime)
+            return (UserDefaults.standard.object(forKey: scopedKey("medicationTime")) as? Date)
+                ?? Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: .now)!
+        }
+        set {
+            withMutation(keyPath: \.medicationTime) {
+                UserDefaults.standard.set(newValue, forKey: scopedKey("medicationTime"))
+            }
+        }
+    }
+
+    // MARK: - Category Preferences (Phase 14)
+    
+    /// User's priority categories selected during onboarding or settings.
+    /// Stored as raw string array of TaskCategory raw values.
+    var priorityCategories: [String] {
+        get {
+            access(keyPath: \.priorityCategories)
+            return UserDefaults.standard.stringArray(forKey: scopedKey("priorityCategories")) ?? []
+        }
+        set {
+            withMutation(keyPath: \.priorityCategories) {
+                UserDefaults.standard.set(newValue, forKey: scopedKey("priorityCategories"))
+            }
+        }
+    }
+    
+    /// Per-category notification toggles. Key = TaskCategory.rawValue, Value = enabled.
+    var categoryNotificationsEnabled: [String: Bool] {
+        get {
+            access(keyPath: \.categoryNotificationsEnabled)
+            return (UserDefaults.standard.dictionary(forKey: scopedKey("categoryNotificationsEnabled")) as? [String: Bool]) ?? [:]
+        }
+        set {
+            withMutation(keyPath: \.categoryNotificationsEnabled) {
+                UserDefaults.standard.set(newValue, forKey: scopedKey("categoryNotificationsEnabled"))
+            }
+        }
+    }
+    
+    /// Whether notifications are enabled for a specific category.
+    func isCategoryNotificationEnabled(_ category: TaskCategory) -> Bool {
+        categoryNotificationsEnabled[category.rawValue] ?? true // Default: enabled
     }
     
     // MARK: - Computed Helpers

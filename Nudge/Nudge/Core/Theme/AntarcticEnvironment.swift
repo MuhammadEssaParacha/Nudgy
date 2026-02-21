@@ -37,11 +37,20 @@ import Combine
 // MARK: - Time of Day
 
 /// Determines the visual theme for the Antarctic scene based on the current hour.
-enum AntarcticTimeOfDay: CaseIterable {
+enum AntarcticTimeOfDay: CaseIterable, Equatable {
     case dawn   // 6am – 10am
     case day    // 10am – 5pm
     case dusk   // 5pm – 8pm
     case night  // 8pm – 6am
+
+    /// Explicit nonisolated == so it can be used in timer/background contexts.
+    /// (Synthesised conformance would be @MainActor due to Color properties.)
+    nonisolated static func == (lhs: AntarcticTimeOfDay, rhs: AntarcticTimeOfDay) -> Bool {
+        switch (lhs, rhs) {
+        case (.dawn, .dawn), (.day, .day), (.dusk, .dusk), (.night, .night): return true
+        default: return false
+        }
+    }
 
     /// Determine from the current device time.
     static var current: AntarcticTimeOfDay {
@@ -426,7 +435,7 @@ private struct IceFloe: Identifiable {
 /// Reads device accelerometer to drive diorama-style parallax.
 /// Shared singleton — Apple requires only ONE CMMotionManager per app.
 /// Reference-counted start/stop so multiple views can share safely.
-private final class ParallaxMotionManager {
+final class ParallaxMotionManager {
     static let shared = ParallaxMotionManager()
 
     /// Raw accumulated offsets — NOT @Observable.
@@ -434,6 +443,8 @@ private final class ParallaxMotionManager {
     /// never triggers independent body invalidations.
     private(set) var xOffset: CGFloat = 0
     private(set) var yOffset: CGFloat = 0
+    /// True only when accelerometer is actually running (false on Simulator).
+    private(set) var isActive: Bool = false
 
     private let motionManager = CMMotionManager()
     private let sensitivity: CGFloat = 18
@@ -445,6 +456,7 @@ private final class ParallaxMotionManager {
         refCount += 1
         guard refCount == 1 else { return }
         guard motionManager.isAccelerometerAvailable else { return }
+        isActive = true
         motionManager.accelerometerUpdateInterval = 1.0 / 20.0  // Match coalesced timer rate
         motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, _ in
             guard let self, let data else { return }
@@ -459,6 +471,7 @@ private final class ParallaxMotionManager {
     func stop() {
         refCount = max(0, refCount - 1)
         guard refCount == 0 else { return }
+        isActive = false
         motionManager.stopAccelerometerUpdates()
         xOffset = 0
         yOffset = 0

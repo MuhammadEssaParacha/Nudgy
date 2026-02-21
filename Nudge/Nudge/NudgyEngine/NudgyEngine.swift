@@ -31,6 +31,7 @@
 
 import Foundation
 import SwiftData
+import os
 
 // MARK: - NudgyEngine
 
@@ -106,10 +107,8 @@ final class NudgyEngine {
         
         isInitialized = true
         
-        #if DEBUG
-        print("🐧 NudgyEngine bootstrapped. LLM available: \(isAvailable)")
-        print("🐧 Memory: \(memory.store.facts.count) facts, \(memory.store.conversationSummaries.count) conversations")
-        #endif
+        Log.ai.debug("NudgyEngine bootstrapped. LLM available: \(self.isAvailable)")
+        Log.ai.debug("Memory: \(self.memory.store.facts.count) facts, \(self.memory.store.conversationSummaries.count) conversations")
     }
     
     /// Sync user name from AppSettings to memory.
@@ -117,6 +116,21 @@ final class NudgyEngine {
         if let name = name, !name.isEmpty {
             memory.updateUserName(name)
         }
+    }
+    
+    /// Sync ADHD profile from AppSettings into all sub-engines.
+    /// Call after user activation and whenever profile settings change.
+    func syncADHDProfile(settings: AppSettings) {
+        let context = PersonaAdapter.adhdProfileContext(
+            ageGroup: settings.ageGroup,
+            subtype: settings.adhdSubtype,
+            challenge: settings.adhdBiggestChallenge,
+            personalityMode: settings.nudgyPersonalityMode
+        )
+        NudgyPersonality.activeProfileContext = context
+        dialogue.configure(ageGroup: settings.ageGroup, personalityMode: settings.nudgyPersonalityMode)
+        stateAdapter.configure(settings: settings)
+        Log.ai.debug("NudgyEngine: ADHD profile synced — mode=\(settings.nudgyPersonalityMode.rawValue), age=\(settings.ageGroup.rawValue), challenge=\(settings.adhdBiggestChallenge.rawValue)")
     }
     
     // MARK: - Chat (Primary Interface)
@@ -144,22 +158,25 @@ final class NudgyEngine {
     // MARK: - Greetings
     
     /// Show a smart greeting.
-    func greet(userName: String?, activeTaskCount: Int, overdueCount: Int = 0, staleCount: Int = 0, doneToday: Int = 0) {
+    /// Phase 14: Added categoryContext for category-aware proactive nudges.
+    func greet(userName: String?, activeTaskCount: Int, overdueCount: Int = 0, staleCount: Int = 0, doneToday: Int = 0, topCategory: (label: String, emoji: String, count: Int)? = nil, categoryContext: CategoryNudgeContext? = nil) {
         syncUserName(userName)
         stateAdapter.greet(
             userName: userName,
             activeTaskCount: activeTaskCount,
             overdueCount: overdueCount,
             staleCount: staleCount,
-            doneToday: doneToday
+            doneToday: doneToday,
+            topCategory: topCategory,
+            categoryContext: categoryContext
         )
     }
     
     // MARK: - Reactions
     
     /// React to task completion.
-    func reactToCompletion(taskContent: String?, remainingCount: Int) {
-        stateAdapter.reactToCompletion(taskContent: taskContent, remainingCount: remainingCount)
+    func reactToCompletion(taskContent: String?, remainingCount: Int, categoryLabel: String? = nil) {
+        stateAdapter.reactToCompletion(taskContent: taskContent, remainingCount: remainingCount, categoryLabel: categoryLabel)
     }
     
     /// React to task snooze.
@@ -251,15 +268,25 @@ final class NudgyEngine {
         voiceOutput.prepareForPlayback()
     }
     
+    // MARK: - One-Shot Insight Generation
+
+    /// Generate a one-shot contextual insight for in-app use (Plan Tomorrow, etc.).
+    /// Uses OpenAI if available, falls back to Apple Foundation Models.
+    /// Returns nil if no LLM backend is available or generation fails.
+    func generateInsight(prompt: String) async -> String? {
+        await conversation.generateOneShotResponse(prompt: prompt)
+    }
+
     // MARK: - Draft Generation
     
     /// Generate a message draft for a task.
-    func generateDraft(taskContent: String, actionType: String, contactName: String?, senderName: String?) async -> (draft: String, subject: String)? {
+    func generateDraft(taskContent: String, actionType: String, contactName: String?, senderName: String?, categoryLabel: String? = nil) async -> (draft: String, subject: String)? {
         await taskExtractor.generateDraft(
             taskContent: taskContent,
             actionType: actionType,
             contactName: contactName,
-            senderName: senderName
+            senderName: senderName,
+            categoryLabel: categoryLabel
         )
     }
     

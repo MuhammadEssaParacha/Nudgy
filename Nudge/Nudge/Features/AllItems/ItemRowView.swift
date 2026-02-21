@@ -60,11 +60,56 @@ struct ItemRowView: View {
                                 .foregroundStyle(DesignTokens.accentActive)
                         }
                         
+                        // Scheduled time
+                        if item.status == .active, let scheduled = item.scheduledTime {
+                            let delta = scheduled.timeIntervalSince(Date())
+                            if delta >= -1800 && delta <= 28800 {
+                                HStack(spacing: 2) {
+                                    Image(systemName: abs(delta) < 1800 ? "bell.fill" : "clock.fill")
+                                        .font(.system(size: 9))
+                                    Text(scheduled.formatted(.dateTime.hour().minute()))
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .foregroundStyle(abs(delta) < 1800 ? DesignTokens.accentActive : DesignTokens.textSecondary)
+                            }
+                        }
+                        
+                        // Due date (compact)
+                        if item.status == .active, let dueDate = item.dueDate {
+                            if dueDate < Date() {
+                                Text(String(localized: "Overdue"))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(DesignTokens.accentOverdue)
+                            } else if Calendar.current.isDateInToday(dueDate) {
+                                Text(String(localized: "Today"))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(DesignTokens.accentStale)
+                            } else if Calendar.current.isDateInTomorrow(dueDate) {
+                                Text(String(localized: "Tomorrow"))
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(DesignTokens.textSecondary)
+                            }
+                        }
+                        
                         // Stale badge
                         if item.isStale {
                             Text(String(localized: "\(item.ageInDays)d"))
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(DesignTokens.accentStale)
+                        }
+                        
+                        // Category label
+                        if item.actionType == nil {
+                            let cat = item.resolvedCategory
+                            if cat != .general {
+                                HStack(spacing: 3) {
+                                    Image(systemName: cat.icon)
+                                        .font(.system(size: 9, weight: .semibold))
+                                    Text(cat.label)
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .foregroundStyle(cat.primaryColor)
+                            }
                         }
                     }
                     .font(AppTheme.footnote)

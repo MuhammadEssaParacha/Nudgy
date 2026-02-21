@@ -50,6 +50,8 @@ struct CapturedTask: Identifiable {
     var actionTarget: String?
     var dueDate: Date?
     var priority: TaskPriority
+    /// Auto-detected category from content
+    var category: TaskCategory?
     /// True when ContactResolver couldn't auto-resolve this contact
     var contactUnresolved: Bool = false
     /// True when a similar task already exists in the active queue
@@ -63,6 +65,7 @@ struct CapturedTask: Identifiable {
         self.actionTarget = extracted.actionTarget.isEmpty ? nil : extracted.actionTarget
         self.dueDate = extracted.parsedDueDate
         self.priority = extracted.mappedPriority
+        self.category = CategoryClassifier.classify(content: extracted.content, actionType: extracted.mappedActionType)
     }
 }
 
@@ -111,13 +114,17 @@ struct NudgyCaptureBar: View {
     // Auto-dismiss
     @State private var autoDismissTask: Task<Void, Never>?
 
+    // Live category preview (debounced while typing)
+    @State private var liveCategory: TaskCategory?
+    @State private var liveCategoryDebounce: Task<Void, Never>?
+
     // External callback
     var onDataChanged: () -> Void = {}
 
     // MARK: - Layout Constants
 
-    private let pillHeight: CGFloat = 46
-    private let pillRadius: CGFloat = 23
+    private let pillHeight: CGFloat = 40
+    private let pillRadius: CGFloat = 20
     private let expandedRadius: CGFloat = 24
 
     /// Safe area bottom inset detected from the device.
@@ -176,6 +183,22 @@ struct NudgyCaptureBar: View {
         .animation(smoothSpring, value: capturedTasks.count)
         .animation(smoothSpring, value: keyboardHeight)
         .animation(smoothSpring, value: showAddAnother)
+        .onChange(of: inputText) { _, newValue in
+            liveCategoryDebounce?.cancel()
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count < 3 {
+                withAnimation(.easeOut(duration: 0.15)) { liveCategory = nil }
+                return
+            }
+            liveCategoryDebounce = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                let detected = CategoryClassifier.classify(content: trimmed, actionType: nil)
+                withAnimation(.easeOut(duration: 0.2)) {
+                    liveCategory = detected == .general ? nil : detected
+                }
+            }
+        }
         .onChange(of: speechService.state) { _, newState in
             handleSpeechState(newState)
         }
@@ -300,15 +323,14 @@ struct NudgyCaptureBar: View {
 
     private var collapsedPill: some View {
         HStack(spacing: DesignTokens.spacingSM) {
-            Image("PenguinTab")
-                .renderingMode(.template)
-                .resizable()
-                .frame(width: 18, height: 18)
-                .foregroundStyle(DesignTokens.textTertiary)
+            // Plus icon — clear affordance to add
+            Image(systemName: "plus")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DesignTokens.accentActive)
 
             Text(currentPlaceholder)
-                .font(AppTheme.footnote)
-                .foregroundStyle(DesignTokens.textTertiary)
+                .font(AppTheme.footnote.weight(.medium))
+                .foregroundStyle(DesignTokens.textSecondary)
                 .contentTransition(.opacity)
                 .id("placeholder-\(promptIndex)")
 
@@ -318,7 +340,8 @@ struct NudgyCaptureBar: View {
             if !penguinState.chatMessages.isEmpty {
                 Button {
                     withAnimation(smoothSpring) { phase = .chatting }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(0.15))
                         isTextFieldFocused = true
                     }
                 } label: {
@@ -351,17 +374,20 @@ struct NudgyCaptureBar: View {
                 }
                 .nudgeAccessibility(
                     label: String(localized: "Voice input"),
-                    hint: String(localized: "Tap to add a task. Hold for brain dump mode."),
+                    hint: String(localized: "Tap to add a task. Hold for unload mode."),
                     traits: .isButton
                 )
         }
         .padding(.horizontal, DesignTokens.spacingLG)
-        .frame(height: pillHeight)
-        .contentShape(Rectangle())
+        .frame(height: 44)
+        .background {
+            Capsule().fill(DesignTokens.accentActive.opacity(0.08))
+        }
+        .contentShape(Capsule())
         .onTapGesture { expandToTyping() }
         .nudgeAccessibility(
-            label: String(localized: "Ask Nudgy"),
-            hint: String(localized: "Tap to type, or use the mic to speak"),
+            label: String(localized: "Add a nudge"),
+            hint: String(localized: "Tap to type a task, or use the mic to speak"),
             traits: .isButton
         )
     }
@@ -369,43 +395,71 @@ struct NudgyCaptureBar: View {
     // MARK: Typing
 
     private var typingPill: some View {
-        HStack(spacing: DesignTokens.spacingSM) {
-            TextField(
-                String(localized: "Add a task, ask anything…"),
-                text: $inputText,
-                axis: .vertical
-            )
-            .font(.system(size: 15, weight: .regular))
-            .foregroundStyle(DesignTokens.textPrimary)
-            .lineLimit(1...4)
-            .submitLabel(.send)
-            .focused($isTextFieldFocused)
-            .onSubmit { submitText() }
+        VStack(spacing: 0) {
+            HStack(spacing: DesignTokens.spacingSM) {
+                TextField(
+                    String(localized: "Add a task, ask anything…"),
+                    text: $inputText,
+                    axis: .vertical
+                )
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(DesignTokens.textPrimary)
+                .lineLimit(1...4)
+                .submitLabel(.send)
+                .focused($isTextFieldFocused)
+                .onSubmit { submitText() }
 
-            if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // Mic when text is empty — tap = single, long-press = brain dump
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(DesignTokens.accentActive)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Circle())
-                    .onTapGesture { startRecording() }
-                    .onLongPressGesture(minimumDuration: 0.5) {
-                        startBrainDumpRecording()
-                    }
-            } else {
-                // Send arrow when text entered
-                Button { submitText() } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 26))
+                if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // Mic when text is empty — tap = single, long-press = brain dump
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(DesignTokens.accentActive)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                        .onTapGesture { startRecording() }
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            startBrainDumpRecording()
+                        }
+                } else {
+                    // Send arrow when text entered
+                    Button { submitText() } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundStyle(DesignTokens.accentActive)
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.scale.combined(with: .opacity))
                 }
-                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, DesignTokens.spacingMD)
+            .padding(.vertical, DesignTokens.spacingSM + 2)
+            
+            // Live category preview chip
+            if let cat = liveCategory {
+                HStack(spacing: 4) {
+                    Image(systemName: cat.icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(cat.primaryColor)
+                    Text(cat.label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(cat.primaryColor)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(cat.primaryColor.opacity(0.15))
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(cat.primaryColor.opacity(0.3), lineWidth: 0.5)
+                        )
+                )
                 .transition(.scale.combined(with: .opacity))
+                .padding(.bottom, DesignTokens.spacingXS)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DesignTokens.spacingMD)
             }
         }
-        .padding(.horizontal, DesignTokens.spacingMD)
-        .padding(.vertical, DesignTokens.spacingSM + 2)
     }
 
     // MARK: Recording
@@ -424,7 +478,7 @@ struct NudgyCaptureBar: View {
 
             if liveTranscript.isEmpty {
                 Text(isBrainDumpRecording
-                     ? String(localized: "Brain dump mode — keep talking…")
+                     ? String(localized: "Unload mode — keep talking…")
                      : String(localized: "Listening…"))
                     .font(AppTheme.footnote)
                     .foregroundStyle(isBrainDumpRecording
@@ -677,6 +731,18 @@ struct NudgyCaptureBar: View {
                         }
                         .foregroundStyle(DesignTokens.accentStale.opacity(0.9))
                     }
+                    
+                    // Category chip
+                    if let cat = task.category, cat != .general {
+                        HStack(spacing: 3) {
+                            Image(systemName: cat.icon)
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(cat.primaryColor)
+                            Text(cat.label)
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundStyle(cat.primaryColor.opacity(0.9))
+                    }
                 }
             }
 
@@ -727,6 +793,7 @@ struct NudgyCaptureBar: View {
         case .search:        return "magnifyingglass"
         case .navigate:      return "map.fill"
         case .addToCalendar: return "calendar"
+        case .setAlarm:      return "alarm.fill"
         }
     }
 
@@ -780,8 +847,9 @@ struct NudgyCaptureBar: View {
                 if message.role == .user { Spacer(minLength: 56) }
 
                 if message.role == .nudgy {
-                    Text("🐧")
-                        .font(.system(size: 12))
+                    Image(systemName: "pawprint.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentActive)
                         .padding(.bottom, 2)
                 }
 
@@ -843,7 +911,8 @@ struct NudgyCaptureBar: View {
         withAnimation(smoothSpring) {
             phase = .typing
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.15))
             isTextFieldFocused = true
         }
     }
@@ -1266,7 +1335,8 @@ struct NudgyCaptureBar: View {
         withAnimation(smoothSpring) {
             phase = .chatting
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.15))
             isTextFieldFocused = true
         }
 
@@ -1366,10 +1436,10 @@ struct NudgyCaptureBar: View {
     ]
 
     private static let nudgesPrompts: [LocalizedStringResource] = [
-        "Add a nudge…",
+        "Type to add a nudge…",
         "What do you need to do?",
-        "Brain dump something…",
-        "Quick — capture it!"
+        "Capture a thought…",
+        "Add a task…"
     ]
 
     private static let youPrompts: [LocalizedStringResource] = [
@@ -1445,8 +1515,6 @@ struct NudgyCaptureBar: View {
         SoundService.shared.playTaskDone()
         onDataChanged()
 
-        let count = capturedTasks.count
-
         withAnimation(smoothSpring) {
             capturedTasks = []
             editingTaskID = nil
@@ -1457,13 +1525,14 @@ struct NudgyCaptureBar: View {
         // Switch to the Nudges tab first, THEN post data-changed
         // so NudgesPageView is visible and can receive the refresh.
         let needsTabSwitch = selectedTab != .nudges
-        if needsTabSwitch {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        Task { @MainActor in
+            if needsTabSwitch {
+                try? await Task.sleep(for: .seconds(0.15))
                 NotificationCenter.default.post(name: .nudgeSwitchToNudges, object: nil)
+                try? await Task.sleep(for: .seconds(0.2))
+            } else {
+                try? await Task.sleep(for: .seconds(0.05))
             }
-        }
-        // Post data-changed after the tab is visible
-        DispatchQueue.main.asyncAfter(deadline: .now() + (needsTabSwitch ? 0.35 : 0.05)) {
             NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
         }
 

@@ -27,7 +27,8 @@ struct DailyReviewView: View {
     @State private var remainingActive: [NudgeItem] = []
     @State private var fishCaughtToday: [FishCatch] = []
     @State private var streak: Int = 0
-    @State private var snowflakesEarned: Int = 0
+    @State private var fishEarned: Int = 0
+    @State private var categoryStreakData: [(category: TaskCategory, days: Int)] = []
     
     enum ReviewPhase {
         case summary
@@ -99,8 +100,9 @@ struct DailyReviewView: View {
     
     private var headerSection: some View {
         VStack(spacing: DesignTokens.spacingSM) {
-            Text("🌙")
-                .font(.system(size: 48))
+            Image(systemName: "moon.stars.fill")
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(.indigo)
                 .scaleEffect(animateIn ? 1 : 0.5)
                 .opacity(animateIn ? 1 : 0)
                 .animation(.spring(response: 0.6, dampingFraction: 0.7), value: animateIn)
@@ -156,6 +158,12 @@ struct DailyReviewView: View {
             
             // Completed tasks list
             if !completedToday.isEmpty {
+                // Phase 10: Category breakdown row
+                categoryBreakdownRow
+                
+                // Phase 12: Category streaks
+                categoryStreaksRow
+                
                 VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                     Text(String(localized: "What you accomplished"))
                         .font(AppTheme.captionBold)
@@ -169,6 +177,12 @@ struct DailyReviewView: View {
                                 .foregroundStyle(DesignTokens.textPrimary)
                                 .lineLimit(1)
                             Spacer()
+                            let cat = item.resolvedCategory
+                            if cat != .general {
+                                Image(systemName: cat.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(cat.primaryColor)
+                            }
                             Image(systemName: "checkmark")
                                 .font(.system(size: 11))
                                 .foregroundStyle(DesignTokens.accentComplete)
@@ -220,8 +234,9 @@ struct DailyReviewView: View {
             
             if fishCaughtToday.isEmpty {
                 VStack(spacing: DesignTokens.spacingSM) {
-                    Text("🎣")
-                        .font(.system(size: 48))
+                    Image(systemName: "fish.fill")
+                        .font(.system(size: 40, weight: .bold))
+                        .foregroundStyle(DesignTokens.textTertiary)
                     Text(String(localized: "No fish today — that's okay! Tomorrow's a new day."))
                         .font(AppTheme.body)
                         .foregroundStyle(DesignTokens.textSecondary)
@@ -234,8 +249,9 @@ struct DailyReviewView: View {
                         let count = fishCaughtToday.filter { $0.species == species }.count
                         if count > 0 {
                             VStack(spacing: 4) {
-                                Text(species.emoji)
-                                    .font(.system(size: 32))
+                                Image(systemName: species.icon)
+                                    .font(.system(size: 28, weight: .semibold))
+                                    .foregroundStyle(Color(hex: species.glowColorHex))
                                 Text("×\(count)")
                                     .font(AppTheme.captionBold)
                                     .foregroundStyle(DesignTokens.textPrimary)
@@ -244,14 +260,15 @@ struct DailyReviewView: View {
                     }
                 }
                 
-                // Total snowflakes
+                // Total fish
                 HStack(spacing: DesignTokens.spacingXS) {
-                    Text("❄️")
-                        .font(.system(size: 20))
-                    Text("+\(snowflakesEarned)")
+                    Image(systemName: "fish.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentActive)
+                    Text("+\(fishEarned)")
                         .font(AppTheme.headline)
                         .foregroundStyle(DesignTokens.accentActive)
-                    Text(String(localized: "snowflakes earned today"))
+                    Text(String(localized: "fish earned today"))
                         .font(AppTheme.caption)
                         .foregroundStyle(DesignTokens.textSecondary)
                 }
@@ -287,8 +304,9 @@ struct DailyReviewView: View {
     
     private var tomorrowEmptyState: some View {
         VStack(spacing: DesignTokens.spacingSM) {
-            Text("🏖️")
-                .font(.system(size: 48))
+            Image(systemName: "sun.horizon.fill")
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(.orange)
             Text(String(localized: "Nothing on your plate! Enjoy a fresh start."))
                 .font(AppTheme.body)
                 .foregroundStyle(DesignTokens.textSecondary)
@@ -298,6 +316,28 @@ struct DailyReviewView: View {
     
     private var tomorrowTaskList: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
+            // Phase 10: Category breakdown for remaining tasks
+            let catCounts = Dictionary(grouping: remainingActive, by: { $0.resolvedCategory })
+                .mapValues(\.count)
+                .sorted { $0.value > $1.value }
+                .filter { $0.key != .general }
+            
+            if !catCounts.isEmpty {
+                HStack(spacing: DesignTokens.spacingSM) {
+                    ForEach(catCounts.prefix(4), id: \.key) { cat, count in
+                        HStack(spacing: 2) {
+                            Image(systemName: cat.icon)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color(hex: cat.primaryColorHex))
+                            Text("\(count)")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color(hex: cat.primaryColorHex))
+                        }
+                    }
+                }
+                .padding(.bottom, DesignTokens.spacingXS)
+            }
+            
             Text(String(localized: "Nudgy recommends starting with:"))
                 .font(AppTheme.caption)
                 .foregroundStyle(DesignTokens.textTertiary)
@@ -325,8 +365,9 @@ struct DailyReviewView: View {
     
     private var tomorrowGoodNight: some View {
         VStack(spacing: DesignTokens.spacingSM) {
-            Text("🐧💤")
-                .font(.system(size: 36))
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(.indigo.opacity(0.7))
             Text(String(localized: "Rest up! Nudgy will be here in the morning."))
                 .font(AppTheme.body)
                 .foregroundStyle(DesignTokens.textSecondary)
@@ -430,6 +471,173 @@ struct DailyReviewView: View {
         .padding(.top, DesignTokens.spacingMD)
     }
     
+    // MARK: - Category Breakdown
+    
+    /// Phase 15: Category breakdown with completion rates — shows done/total + mini progress.
+    private var categoryBreakdownRow: some View {
+        // Gather all categories that had tasks today (done + remaining)
+        let doneCounts = Dictionary(grouping: completedToday, by: { $0.resolvedCategory })
+            .mapValues(\.count)
+        let remainingCounts = Dictionary(grouping: remainingActive, by: { $0.resolvedCategory })
+            .mapValues(\.count)
+        
+        // Merge into category stats
+        let allCategories = Set(doneCounts.keys).union(remainingCounts.keys).subtracting([.general])
+        let catStats: [(cat: TaskCategory, done: Int, total: Int)] = allCategories.map { cat in
+            let done = doneCounts[cat] ?? 0
+            let remaining = remainingCounts[cat] ?? 0
+            return (cat: cat, done: done, total: done + remaining)
+        }
+        .sorted { $0.done > $1.done }
+        
+        // Find best category (100% done, at least 1 task)
+        let bestCat = catStats.first { $0.done == $0.total && $0.total > 0 }
+        // Find needs-attention (0% done, has remaining)
+        let needsAttention = catStats.first { $0.done == 0 && $0.total > 0 }
+        
+        return Group {
+            if !catStats.isEmpty {
+                VStack(alignment: .leading, spacing: DesignTokens.spacingSM) {
+                    // Category completion capsules with progress
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: DesignTokens.spacingSM) {
+                            ForEach(catStats, id: \.cat) { stat in
+                                HStack(spacing: 6) {
+                                    Image(systemName: stat.cat.icon)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color(hex: stat.cat.primaryColorHex))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(stat.cat.label)")
+                                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(DesignTokens.textPrimary)
+                                        HStack(spacing: 4) {
+                                            // Mini progress bar
+                                            GeometryReader { geo in
+                                                ZStack(alignment: .leading) {
+                                                    Capsule()
+                                                        .fill(Color.white.opacity(0.08))
+                                                    Capsule()
+                                                        .fill(stat.done == stat.total
+                                                              ? DesignTokens.accentComplete
+                                                              : Color(hex: stat.cat.primaryColorHex))
+                                                        .frame(width: geo.size.width * CGFloat(stat.done) / CGFloat(max(stat.total, 1)))
+                                                }
+                                            }
+                                            .frame(width: 32, height: 4)
+                                            
+                                            Text("\(stat.done)/\(stat.total)")
+                                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                                .foregroundStyle(stat.done == stat.total
+                                                                 ? DesignTokens.accentComplete
+                                                                 : DesignTokens.textTertiary)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background {
+                                    Capsule()
+                                        .fill(Color(hex: stat.cat.primaryColorHex).opacity(0.12))
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Callout badges
+                    HStack(spacing: DesignTokens.spacingSM) {
+                        if let best = bestCat {
+                            Label {
+                                Text(String(localized: "\(best.cat.label) — all done!"))
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(DesignTokens.accentComplete)
+                            } icon: {
+                                Image(systemName: "trophy.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.yellow)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background {
+                                Capsule()
+                                    .fill(DesignTokens.accentComplete.opacity(0.12))
+                            }
+                        }
+                        
+                        if let needs = needsAttention {
+                            Label {
+                                Text(String(localized: "\(needs.cat.label) needs love"))
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(DesignTokens.accentOverdue)
+                            } icon: {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(DesignTokens.accentOverdue)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background {
+                                Capsule()
+                                    .fill(DesignTokens.accentOverdue.opacity(0.12))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Category Streaks
+    
+    /// Phase 12: Category streak badges — consecutive days completing tasks in a category.
+    private var categoryStreaksRow: some View {
+        Group {
+            if !categoryStreakData.isEmpty {
+                VStack(alignment: .leading, spacing: DesignTokens.spacingSM) {
+                    Text(String(localized: "Category Streaks"))
+                        .font(AppTheme.caption.weight(.semibold))
+                        .foregroundStyle(DesignTokens.textTertiary)
+                        .textCase(.uppercase)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: DesignTokens.spacingSM) {
+                            ForEach(categoryStreakData.prefix(3), id: \.category) { streak in
+                                HStack(spacing: 6) {
+                                    Image(systemName: streak.category.icon)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color(hex: streak.category.primaryColorHex))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(streak.category.label)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(DesignTokens.textPrimary)
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "flame.fill")
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.orange)
+                                            Text(String(localized: "\(streak.days) days"))
+                                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                                .foregroundStyle(.orange)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(streak.category.primaryColor.opacity(0.10))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .strokeBorder(streak.category.primaryColor.opacity(0.2), lineWidth: 0.5)
+                                        )
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.top, DesignTokens.spacingSM)
+            }
+        }
+    }
+    
     // MARK: - Stat Card
     
     private func statCard(value: String, label: String, icon: String, color: Color) -> some View {
@@ -461,11 +669,12 @@ struct DailyReviewView: View {
         completedToday = grouped.doneToday
         remainingActive = repo.fetchActiveQueue()
         streak = RewardService.shared.currentStreak
+        categoryStreakData = repo.categoryStreaks()
         
         // Fish caught today
         let allCatches = RewardService.shared.fishCatches
         let calendar = Calendar.current
         fishCaughtToday = allCatches.filter { calendar.isDateInToday($0.caughtAt) }
-        snowflakesEarned = fishCaughtToday.reduce(0) { $0 + $1.species.snowflakeValue }
+        fishEarned = fishCaughtToday.count
     }
 }

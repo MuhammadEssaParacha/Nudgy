@@ -4,17 +4,18 @@
 //
 //  The redesigned Nudges tab — "One Surface, Zero Navigation."
 //
-//  Layout (progressive scroll density):
-//    0. Quick capture (inline, replaces toolbar + button)
-//    1. Stats strip (fish, streak, snowflakes, progress)
-//    2. Streak risk banner (if applicable)
-//    3. Daily challenge badge (if in progress)
-//    4. Hero card (THE task, picked by SmartPick)
-//    5. "Not this one" skip button
-//    6. Paralysis prompt (after 3 skips)
-//    7. Up next (2-3 peek cards)
-//    8. Done today (trophy case — glass container)
-//    9. Pile count (expandable remaining)
+//  Layout (progressive scroll density — ADHD-optimized):
+//    0. Time subtitle + drafting indicator
+//    1. Category filter chips (if ≥2 categories)
+//    2. Hero card (THE task, picked by SmartPick — first thing you see)
+//    3. "Not this one" skip button
+//    4. Paralysis prompt (after 3 skips)
+//    5. Up next (2 peek cards — reduced for less choice paralysis)
+//    6. Done today (trophy case)
+//    7. Stats strip (fish, streak, progress — below the action zone)
+//    8. Streak risk banner
+//    9. Daily challenge badge
+//   10. Pile count (expandable remaining, sorted by urgency)
 //
 //  Key innovations:
 //  - Cards EXECUTE tasks, not just display them (CALL/TEXT/EMAIL buttons)
@@ -61,8 +62,10 @@ struct NudgesPageView: View {
     // Fish rewards
     @State private var fishHUDPosition: CGPoint = CGPoint(x: 60, y: 60)
     @State private var lastEarnedSpecies: FishSpecies?
-    @State private var lastSnowflakesEarned: Int = 0
+    @State private var lastFishEarned: Int = 0
     @State private var showCompletionParticles = false
+    @State private var completionCategoryColor: Color? = nil
+    @State private var lastCompletionCategoryInfo: (icon: String, label: String, count: Int)? = nil
     
     // Drafting
     @State private var draftGenerationTask: Task<Void, Never>?
@@ -84,6 +87,9 @@ struct NudgesPageView: View {
     // Hero card transition
     @State private var heroTransitionID = UUID()
     
+    // Category filter
+    @State private var selectedCategoryFilter: TaskCategory? = nil
+    
     // Background glow
     @State private var breatheAnimation = false
     
@@ -93,8 +99,13 @@ struct NudgesPageView: View {
     // Drafting indicator
     @State private var isDraftingCount: Int = 0
     
-    // NudgyPeekMunch (mini penguin eating animation)
-    @State private var showNudgyPeek = false
+    // Time-based auto-refresh (every 15 min to keep urgency scores fresh)
+    @State private var refreshTask: Task<Void, Never>? = nil
+    
+    // Detail popup (tap any stacked card to inspect)
+    @State private var showDetailPopup = false
+    @State private var detailItems: [NudgeItem] = []
+    @State private var detailSelectedIndex: Int = 0
     
     // MARK: - Computed
     
@@ -117,19 +128,50 @@ struct NudgesPageView: View {
         return .noTasks
     }
     
+    /// Categories present in the active queue (for filter chips).
+    private var activeCategories: [TaskCategory] {
+        var seen = Set<TaskCategory>()
+        var result: [TaskCategory] = []
+        for item in allActive {
+            let cat = item.resolvedCategory
+            if cat != .general && seen.insert(cat).inserted {
+                result.append(cat)
+            }
+        }
+        return result.sorted { $0.label < $1.label }
+    }
+    
+    /// Filtered items based on category selection.
+    private var filteredActive: [NudgeItem] {
+        guard let filter = selectedCategoryFilter else { return allActive }
+        return allActive.filter { $0.resolvedCategory == filter }
+    }
+    
     // MARK: - Time-Aware Greeting
     
     private var timeGreeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
         switch hour {
-        case 5..<12:  return String(localized: "Good morning ☕")
-        case 12..<17: return String(localized: "Good afternoon ☀️")
-        case 17..<21: return String(localized: "Good evening 🌙")
-        default:      return String(localized: "Late night 🌟")
+        case 5..<12:  return String(localized: "Good morning")
+        case 12..<17: return String(localized: "Good afternoon")
+        case 17..<21: return String(localized: "Good evening")
+        default:      return String(localized: "Late night")
         }
     }
     
     private var timeSubtitle: String {
+        // When category filter is active, show filtered context
+        if let filter = selectedCategoryFilter {
+            let count = filteredActive.count
+            let label = filter.label.lowercased()
+            if count == 0 {
+                return String(localized: "No \(label) tasks right now")
+            } else if count == 1 {
+                return String(localized: "1 \(label) task")
+            }
+            return String(localized: "\(count) \(label) tasks")
+        }
+        
         let active = allActive.count
         let done = doneToday.count
         if done > 0 && active > 0 {
@@ -155,7 +197,9 @@ struct NudgesPageView: View {
                     NudgesEmptyState(
                         variant: emptyVariant,
                         snoozedCount: snoozedItems.count,
-                        lastSnowflakesEarned: lastSnowflakesEarned
+                        lastFishEarned: lastFishEarned,
+                        categoryRecap: buildCategoryRecap(),
+                        onWakeSnooze: wakeOldestSnooze
                     )
                     .transition(.opacity)
                 } else {
@@ -171,7 +215,7 @@ struct NudgesPageView: View {
                 
                 // Completion particles
                 if showCompletionParticles {
-                    CompletionParticles(isActive: $showCompletionParticles)
+                    CompletionParticles(isActive: $showCompletionParticles, categoryColor: completionCategoryColor)
                         .allowsHitTesting(false)
                 }
                 
@@ -187,18 +231,43 @@ struct NudgesPageView: View {
                 if showSpeciesToast, let species = lastEarnedSpecies {
                     SpeciesToast(
                         species: species,
-                        snowflakesEarned: lastSnowflakesEarned,
+                        fishEarned: lastFishEarned,
                         isRare: species == .swordfish || species == .whale,
+                        categoryInfo: lastCompletionCategoryInfo,
                         isPresented: $showSpeciesToast
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(50)
                 }
                 
-                // NudgyPeekMunch — mini penguin eating
-                if showNudgyPeek {
-                    NudgyPeekMunch(isActive: $showNudgyPeek, species: lastEarnedSpecies)
-                        .allowsHitTesting(false)
+                // Detail popup — tap any stacked card to inspect
+                if showDetailPopup {
+                    NudgeDetailPopup(
+                        items: detailItems,
+                        selectedIndex: $detailSelectedIndex,
+                        isPresented: $showDetailPopup,
+                        onDone: { item in markDoneWithCelebration(item) },
+                        onSnooze: { item, date in
+                            repository?.snooze(item, until: date)
+                            refreshData()
+                            NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
+                            syncLiveActivity()
+                        },
+                        onDelete: { item in
+                            repository?.drop(item)
+                            refreshData()
+                            NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
+                            syncLiveActivity()
+                        },
+                        onFocus: { item in
+                            showDetailPopup = false
+                            focusTimerItem = item
+                        },
+                        onAction: { item in performAction(item) },
+                        onContentChanged: { refreshData() }
+                    )
+                    .transition(.opacity)
+                    .zIndex(200)
                 }
             }
             .navigationTitle(timeGreeting)
@@ -208,20 +277,14 @@ struct NudgesPageView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: DesignTokens.spacingSM) {
                         HStack(spacing: 2) {
-                            SnowflakeIcon(size: 10)
-                            Text("\(RewardService.shared.snowflakes)")
+                            Image(systemName: "fish.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(DesignTokens.goldCurrency)
+                            Text("\(RewardService.shared.fish)")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(DesignTokens.textTertiary)
                         }
                         
-                        if RewardService.shared.currentStreak > 0 {
-                            HStack(spacing: 2) {
-                                FlameIcon(size: 10)
-                                Text("\(RewardService.shared.currentStreak)")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(DesignTokens.textTertiary)
-                            }
-                        }
                     }
                     .opacity(0.7)
                 }
@@ -234,10 +297,21 @@ struct NudgesPageView: View {
             triggerDraftGeneration()
             syncLiveActivity()
             breatheAnimation = true
+            // Start 15-min auto-refresh to keep time-based scoring fresh
+            refreshTask?.cancel()
+            refreshTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(900))
+                    guard !Task.isCancelled else { break }
+                    refreshData()
+                }
+            }
         }
         .onDisappear {
             undoTimerTask?.cancel()
             draftGenerationTask?.cancel()
+            refreshTask?.cancel()
+            refreshTask = nil
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .nudges {
@@ -316,34 +390,12 @@ struct NudgesPageView: View {
                 }
                 .padding(.horizontal, DesignTokens.spacingXS)
                 
-                // 1. Stats strip
-                StatsStripView(
-                    completedToday: doneToday.count,
-                    totalToday: totalToday,
-                    streak: RewardService.shared.currentStreak,
-                    fishToday: RewardService.shared.tasksCompletedToday,
-                    snowflakes: RewardService.shared.snowflakes,
-                    lastSpecies: lastEarnedSpecies,
-                    onFishHUDPosition: { pos in fishHUDPosition = pos }
-                )
-                .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
-                    content
-                        .opacity(phase.isIdentity ? 1 : 0.6)
-                        .scaleEffect(phase.isIdentity ? 1 : 0.95)
+                // 1. Category filter chips
+                if activeCategories.count >= 2 {
+                    categoryFilterStrip
                 }
                 
-                // 2. Streak risk banner
-                StreakRiskBanner(
-                    streak: RewardService.shared.currentStreak,
-                    completedToday: doneToday.count
-                )
-                
-                // 3. Daily challenge badge
-                ChallengeProgressBadge(
-                    challenges: RewardService.shared.dailyChallenges
-                )
-                
-                // 4. Hero card
+                // 2. Hero card — first thing you see
                 if let hero = heroItem {
                     HeroCardView(
                         item: hero,
@@ -353,12 +405,11 @@ struct NudgesPageView: View {
                         onSnooze: { snoozeQuick(hero) },
                         onSkip: { skipToNext(hero) },
                         onAction: { performAction(hero) },
-                        onFocus: hero.estimatedMinutes != nil
-                            ? { focusTimerItem = hero }
-                            : nil,
+                        onFocus: { focusTimerItem = hero },
                         onRegenerate: hero.hasDraft
                             ? { regenerateDraft(hero) }
-                            : nil
+                            : nil,
+                        onDetail: { openDetail(for: hero, in: allActive) }
                     )
                     .id(heroTransitionID)
                     .transition(
@@ -371,17 +422,16 @@ struct NudgesPageView: View {
                         content
                             .opacity(phase.isIdentity ? 1 : 0.3)
                             .scaleEffect(phase.isIdentity ? 1 : 0.92)
-                            .blur(radius: phase.isIdentity ? 0 : 2)
                     }
                 }
                 
-                // 5. "Not this one" skip button
+                // 3. "Not this one" skip button
                 if heroItem != nil && allActive.count > 1 {
                     skipButton
                         .transition(.opacity)
                 }
                 
-                // 6. Paralysis prompt
+                // 4. Paralysis prompt
                 if skipManager.showParalysisPrompt {
                     ParalysisPromptView(
                         skipCount: skipManager.skipCount,
@@ -401,11 +451,14 @@ struct NudgesPageView: View {
                     )
                 }
                 
-                // 7. Up next
+                // 5. Up next — only 2 to reduce choice paralysis
                 UpNextSection(
                     items: upNextItems,
                     streak: RewardService.shared.currentStreak,
-                    onPromote: { item in promoteToHero(item) }
+                    onPromote: { item in promoteToHero(item) },
+                    onDetail: { item in openDetail(for: item, in: upNextItems) },
+                    onDone: { item in markDoneWithCelebration(item) },
+                    onSnooze: { item in snoozeQuick(item) }
                 )
                 .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
                     content
@@ -413,20 +466,23 @@ struct NudgesPageView: View {
                         .offset(y: phase.isIdentity ? 0 : 20)
                 }
                 
-                // 8. Done today
-                DoneTodayStrip(items: doneToday)
+                // 6. Done today (tappable cards)
+                DoneTodayStrip(items: doneToday, onTapItem: { item in
+                    openDetail(for: item, in: doneToday)
+                })
                     .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
                         content
                             .opacity(phase.isIdentity ? 1 : 0.4)
                             .offset(y: phase.isIdentity ? 0 : 16)
                     }
                 
-                // 9. Pile
+                // 7. Pile
                 PileCountRow(
                     items: pileItems,
                     streak: RewardService.shared.currentStreak,
                     onDone: { item in markDoneWithCelebration(item) },
-                    onSnooze: { item in snoozeQuick(item) }
+                    onSnooze: { item in snoozeQuick(item) },
+                    onDetail: { item in openDetail(for: item, in: pileItems) }
                 )
                 .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
                     content
@@ -480,7 +536,7 @@ struct NudgesPageView: View {
                 AntarcticEnvironment(
                     mood: RewardService.shared.environmentMood,
                     unlockedProps: RewardService.shared.unlockedProps,
-                    fishCount: RewardService.shared.snowflakes,
+                    fishCount: RewardService.shared.fish,
                     level: RewardService.shared.level,
                     stage: StageTier.from(level: RewardService.shared.level),
                     sceneWidth: geo.size.width,
@@ -530,19 +586,30 @@ struct NudgesPageView: View {
                 Spacer()
                 
                 Button {
+                    HapticService.shared.swipeSkip()
                     undoLastDone()
                 } label: {
                     Text(String(localized: "Undo"))
                         .font(AppTheme.body.weight(.semibold))
                         .foregroundStyle(DesignTokens.accentActive)
                 }
+                .nudgeAccessibility(
+                    label: String(localized: "Undo"),
+                    hint: String(localized: "Bring back the last completed task"),
+                    traits: .isButton
+                )
             }
             .padding(DesignTokens.spacingLG)
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusCard))
             .shadow(color: .black.opacity(0.4), radius: 16, y: 4)
             .padding(.horizontal, DesignTokens.spacingLG)
             .padding(.bottom, 80)
+            .nudgeAccessibilityElement(
+                label: String(localized: "Task marked done"),
+                hint: String(localized: "Undo button available")
+            )
         }
+        .nudgeAnnouncement(String(localized: "Task completed. Undo available."))
     }
     
     // MARK: - Data
@@ -568,6 +635,14 @@ struct NudgesPageView: View {
             doneToday = grouped.doneToday
         }
         
+        // Auto-clear category filter if no active items match
+        if let filter = selectedCategoryFilter,
+           !allActive.contains(where: { $0.resolvedCategory == filter }) {
+            withAnimation(AnimationConstants.springSmooth) {
+                selectedCategoryFilter = nil
+            }
+        }
+        
         // Pick hero card
         pickHero()
     }
@@ -588,7 +663,10 @@ struct NudgesPageView: View {
     // MARK: - Hero Selection
     
     private func pickHero() {
-        guard !allActive.isEmpty else {
+        // Use filtered list when a category filter is active
+        let source = filteredActive
+        
+        guard !source.isEmpty else {
             heroItem = nil
             heroReason = ""
             upNextItems = []
@@ -597,8 +675,8 @@ struct NudgesPageView: View {
         }
         
         // Exclude currently skipped items (unless all are skipped)
-        let candidates = allActive.filter { !skipManager.skippedIDs.contains($0.id) }
-        let pool = candidates.isEmpty ? allActive : candidates
+        let candidates = source.filter { !skipManager.skippedIDs.contains($0.id) }
+        let pool = candidates.isEmpty ? source : candidates
         
         // SmartPick with energy awareness (the fix!)
         let picked = SmartPickEngine.pickBest(from: pool, currentEnergy: currentEnergy)
@@ -611,19 +689,94 @@ struct NudgesPageView: View {
             withAnimation(reduceMotion ? .none : AnimationConstants.springSmooth) {
                 heroItem = hero
                 heroReason = SmartPickEngine.reason(for: hero)
+                if heroReason.isEmpty { heroReason = String(localized: "let's get this one done") }
                 heroTransitionID = UUID() // Force new transition
             }
+            
+            // Announce to VoiceOver
+            UIAccessibility.post(notification: .announcement, argument: hero.content)
             
             // Trigger draft generation for new hero
             triggerHeroDraft(hero)
         }
         
-        // Build up-next and pile lists
-        let remaining = allActive.filter { $0.id != hero.id }
+        // Build up-next and pile lists (SmartPick-ranked ordering)
+        let remaining = source.filter { $0.id != hero.id }
+        let ranked = SmartPickEngine.ranked(from: remaining, currentEnergy: currentEnergy)
         withAnimation(AnimationConstants.springSmooth) {
-            upNextItems = Array(remaining.prefix(3))
-            pileItems = remaining.count > 3 ? Array(remaining.dropFirst(3)) : []
+            upNextItems = Array(ranked.prefix(2))
+            pileItems = ranked.count > 2 ? Array(ranked.dropFirst(2)) : []
         }
+    }
+    
+    // MARK: - Category Filter Strip
+    
+    private var categoryFilterStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DesignTokens.spacingXS) {
+                // "All" chip
+                filterChip(
+                    icon: "sparkles",
+                    label: String(localized: "All · \(allActive.count)"),
+                    isSelected: selectedCategoryFilter == nil,
+                    color: DesignTokens.accentActive
+                ) {
+                    withAnimation(AnimationConstants.springSmooth) {
+                        selectedCategoryFilter = nil
+                    }
+                    pickHero()
+                }
+                
+                ForEach(activeCategories, id: \.self) { category in
+                    let count = allActive.filter { $0.resolvedCategory == category }.count
+                    filterChip(
+                        icon: category.icon,
+                        label: "\(category.label) · \(count)",
+                        isSelected: selectedCategoryFilter == category,
+                        color: category.primaryColor
+                    ) {
+                        withAnimation(AnimationConstants.springSmooth) {
+                            selectedCategoryFilter = (selectedCategoryFilter == category) ? nil : category
+                        }
+                        pickHero()
+                    }
+                }
+            }
+            .padding(.horizontal, DesignTokens.spacingXS)
+        }
+    }
+    
+    private func filterChip(icon: String, label: String, isSelected: Bool, color: Color, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticService.shared.snoozeTimeSelected()
+            action()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+            }
+            .foregroundStyle(isSelected ? .white : DesignTokens.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(isSelected ? color.opacity(0.30) : Color.white.opacity(0.05))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(isSelected ? color.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 0.5)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.0 : 0.95)
+            .animation(AnimationConstants.springSnappy, value: isSelected)
+        }
+        .buttonStyle(.plain)
+        .nudgeAccessibility(
+            label: isSelected ? String(localized: "\(label), selected") : label,
+            hint: String(localized: "Filter tasks by category"),
+            traits: isSelected ? [.isButton, .isSelected] : .isButton
+        )
     }
     
     // MARK: - Actions
@@ -631,14 +784,24 @@ struct NudgesPageView: View {
     private func markDoneWithCelebration(_ item: NudgeItem) {
         let previousSortOrder = item.sortOrder
         repository?.markDone(item)
-        HapticService.shared.swipeDone()
+        HapticService.shared.completionHaptic(for: item.resolvedCategory)
         SoundService.shared.playTaskDone()
         
         // Remove from Spotlight
         SpotlightIndexer.removeTask(id: item.id)
         
-        // Phase 7: Celebration particles
+        // Phase 7: Category-colored celebration particles
+        let doneCat = item.resolvedCategory
+        completionCategoryColor = doneCat != .general ? doneCat.primaryColor : nil
         showCompletionParticles = true
+        
+        // Phase 7: Category counter for SpeciesToast
+        if doneCat != .general {
+            let catDoneToday = doneToday.filter { $0.resolvedCategory == doneCat }.count + 1 // +1 for this one
+            lastCompletionCategoryInfo = (icon: doneCat.icon, label: doneCat.label, count: catDoneToday)
+        } else {
+            lastCompletionCategoryInfo = nil
+        }
         
         // Record fish reward
         let isAllClear = allActive.count <= 1
@@ -649,7 +812,7 @@ struct NudgesPageView: View {
         )
         let species = FishEconomy.speciesForTask(item)
         lastEarnedSpecies = species
-        lastSnowflakesEarned = earned
+        lastFishEarned = earned
         
         // Post fish burst
         NotificationCenter.default.post(
@@ -658,7 +821,8 @@ struct NudgesPageView: View {
             userInfo: [
                 "origin": CGPoint(x: 200, y: 400),
                 "hudPosition": fishHUDPosition,
-                "fishCount": min(species.snowflakeValue, 5)
+                "fishCount": min(species.fishValue, 5),
+                "categoryRaw": item.resolvedCategory.rawValue
             ]
         )
         SoundService.shared.playFishCaught()
@@ -680,13 +844,7 @@ struct NudgesPageView: View {
                 userInfo: ["species": species.label]
             )
             
-            // 0.8s — NudgyPeekMunch
-            try? await Task.sleep(for: .seconds(0.4))
-            withAnimation(AnimationConstants.springSmooth) {
-                showNudgyPeek = true
-            }
-            
-            // 1.2s — SpeciesToast slides in
+            // 0.8s — SpeciesToast slides in
             try? await Task.sleep(for: .seconds(0.4))
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showSpeciesToast = true
@@ -700,7 +858,7 @@ struct NudgesPageView: View {
             // Clear species after animation
             try? await Task.sleep(for: .seconds(0.35))
             lastEarnedSpecies = nil
-            lastSnowflakesEarned = 0
+            lastFishEarned = 0
         }
         
         // Reset skip cycle
@@ -735,6 +893,17 @@ struct NudgesPageView: View {
         syncLiveActivity()
     }
     
+    /// Wake the oldest snoozed task — called from the "all snoozed" empty state.
+    private func wakeOldestSnooze() {
+        guard let oldest = snoozedItems.sorted(by: { $0.snoozedUntil ?? .distantFuture < $1.snoozedUntil ?? .distantFuture }).first else { return }
+        repository?.resurfaceItem(oldest)
+        HapticService.shared.cardAppear()
+        SoundService.shared.playNudgeKnock()
+        refreshData()
+        NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
+        syncLiveActivity()
+    }
+    
     private func skipToNext(_ item: NudgeItem) {
         HapticService.shared.prepare()
         
@@ -742,6 +911,15 @@ struct NudgesPageView: View {
             skipManager.recordSkip(item: item, streak: RewardService.shared.currentStreak)
             pickHero()
         }
+    }
+    
+    private func openDetail(for item: NudgeItem, in list: [NudgeItem]) {
+        detailItems = list
+        detailSelectedIndex = list.firstIndex(where: { $0.id == item.id }) ?? 0
+        withAnimation(AnimationConstants.springSmooth) {
+            showDetailPopup = true
+        }
+        HapticService.shared.actionButtonTap()
     }
     
     private func promoteToHero(_ item: NudgeItem) {
@@ -753,12 +931,17 @@ struct NudgesPageView: View {
         withAnimation(reduceMotion ? .none : AnimationConstants.springSmooth) {
             heroItem = item
             heroReason = SmartPickEngine.reason(for: item)
+            if heroReason.isEmpty { heroReason = String(localized: "let's get this one done") }
             heroTransitionID = UUID()
             
-            let remaining = allActive.filter { $0.id != item.id }
-            upNextItems = Array(remaining.prefix(3))
-            pileItems = remaining.count > 3 ? Array(remaining.dropFirst(3)) : []
+            let remaining = filteredActive.filter { $0.id != item.id }
+            let ranked = SmartPickEngine.ranked(from: remaining, currentEnergy: currentEnergy)
+            upNextItems = Array(ranked.prefix(2))
+            pileItems = ranked.count > 2 ? Array(ranked.dropFirst(2)) : []
         }
+        
+        // Announce to VoiceOver
+        UIAccessibility.post(notification: .announcement, argument: item.content)
         
         triggerHeroDraft(item)
     }
@@ -867,6 +1050,10 @@ struct NudgesPageView: View {
         case .active:   accentHex = "0A84FF"
         }
         
+        let cat = topItem.resolvedCategory
+        let catLabel = cat != .general ? cat.label : nil
+        let catHex = cat != .general ? cat.primaryColorHex : nil
+        
         if LiveActivityManager.shared.isRunning {
             Task {
                 await LiveActivityManager.shared.update(
@@ -875,33 +1062,62 @@ struct NudgesPageView: View {
                     queuePosition: 1,
                     queueTotal: allActive.count,
                     accentHex: accentHex,
-                    taskID: topItem.id.uuidString
+                    taskID: topItem.id.uuidString,
+                    categoryLabel: catLabel,
+                    categoryColorHex: catHex
                 )
             }
         } else {
-            LiveActivityManager.shared.start(
-                taskContent: topItem.content,
-                taskEmoji: emoji,
-                queuePosition: 1,
-                queueTotal: allActive.count,
-                accentHex: accentHex,
-                taskID: topItem.id.uuidString
-            )
+            Task {
+                await LiveActivityManager.shared.start(
+                    taskContent: topItem.content,
+                    taskEmoji: emoji,
+                    queuePosition: 1,
+                    queueTotal: allActive.count,
+                    accentHex: accentHex,
+                    taskID: topItem.id.uuidString,
+                    categoryLabel: catLabel,
+                    categoryColorHex: catHex
+                )
+            }
         }
     }
     
+    /// Phase 7: Build category recap for empty state
+    private func buildCategoryRecap() -> [(icon: String, label: String, color: Color, count: Int)] {
+        var counts: [TaskCategory: Int] = [:]
+        for item in doneToday {
+            let cat = item.resolvedCategory
+            guard cat != .general else { continue }
+            counts[cat, default: 0] += 1
+        }
+        return counts
+            .map { (icon: $0.key.icon, label: $0.key.label, color: $0.key.primaryColor, count: $0.value) }
+            .sorted { $0.count > $1.count }
+    }
+    
     private func syncWidgetData() {
-        guard let defaults = UserDefaults(suiteName: AppGroupID.suiteName) else { return }
+        // Use heroItem as the "next" task if set, otherwise first active
+        let orderedActive: [NudgeItem] = {
+            guard let hero = heroItem else { return allActive }
+            // Put heroItem first so WidgetDataService picks it as the next task
+            return [hero] + allActive.filter { $0.id != hero.id }
+        }()
+        let completedCount = doneToday.count
+        let totalCount = totalToday
         
-        let nextItem = heroItem ?? allActive.first
-        defaults.set(nextItem?.content, forKey: "widget_nextTask")
-        defaults.set(nextItem?.emoji ?? "🐧", forKey: "widget_nextTaskEmoji")
-        defaults.set(nextItem?.id.uuidString, forKey: "widget_nextTaskID")
-        defaults.set(allActive.count, forKey: "widget_activeCount")
-        defaults.set(doneToday.count, forKey: "widget_completedToday")
-        defaults.set(totalToday, forKey: "widget_totalToday")
+        // Get wardrobe for gamification data
+        let wardrobe: NudgyWardrobe? = {
+            let descriptor = FetchDescriptor<NudgyWardrobe>()
+            return try? modelContext.fetch(descriptor).first
+        }()
         
-        WidgetCenter.shared.reloadAllTimelines()
+        WidgetDataService.sync(
+            activeTasks: orderedActive,
+            completedTodayCount: completedCount,
+            totalTodayCount: totalCount,
+            wardrobe: wardrobe
+        )
     }
 }
 

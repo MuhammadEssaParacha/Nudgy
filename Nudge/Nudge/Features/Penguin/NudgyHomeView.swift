@@ -17,6 +17,7 @@
 import SwiftUI
 import SwiftData
 import Speech
+import os
 
 struct NudgyHomeView: View {
 
@@ -66,7 +67,27 @@ struct NudgyHomeView: View {
     /// Mood reactor for Nudgy expressions
     private let moodReactor = PenguinMoodReactor.shared
 
+    /// Parallax offset driven by device tilt (same manager as AntarcticEnvironment)
+    @State private var parallaxX: CGFloat = 0
+    @State private var parallaxY: CGFloat = 0
+    @State private var parallaxTimer: Timer?           // must be retained or it fires once and dies
+    private let parallaxMgr = ParallaxMotionManager.shared
 
+    /// Expression-driven mood ring colour
+    private var moodRingColor: Color {
+        switch penguinState.expression {
+        case .happy, .celebrating, .waving:   return Color(hex: "FFD700") // gold
+        case .sleeping:                        return Color(hex: "7B9FD4") // soft blue
+        case .thinking, .confused, .typing:   return Color(hex: "B388FF") // purple
+        case .listening, .talking:             return Color(hex: "40C4FF") // cyan
+        case .shy:                             return Color(hex: "FF80AB") // pink
+        case .mischievous:                     return Color(hex: "69F0AE") // green
+        case .thumbsUp:                        return Color(hex: "00E676") // bright green
+        case .nudging:                         return Color(hex: "FF9100") // orange
+        default:                               return penguinState.accentColor
+        }
+    }
+    
     var body: some View {
         ZStack {
             // OLED canvas + subtle ambient glow
@@ -118,11 +139,6 @@ struct NudgyHomeView: View {
                 Spacer()
                     .frame(maxHeight: 20)
 
-                // Bottom action buttons removed — NudgyCaptureBar
-                // is now the universal input surface on every tab.
-                // Voice conversation + brain dump voice remain accessible
-                // via the capture bar's mic button.
-                
                 // Spacer so Nudgy doesn't sit behind the capture bar
                 Spacer()
                     .frame(height: 80)
@@ -156,7 +172,7 @@ struct NudgyHomeView: View {
             CelestialExpandedOverlay(
                 isExpanded: $showInventory,
                 level: RewardService.shared.level,
-                fishCount: RewardService.shared.snowflakes,
+                fishCount: RewardService.shared.fish,
                 streak: RewardService.shared.currentStreak,
                 levelProgress: RewardService.shared.levelProgress,
                 tasksToday: RewardService.shared.tasksCompletedToday,
@@ -175,14 +191,32 @@ struct NudgyHomeView: View {
             startBreathingAnimation()
             refreshActiveQueue()
             updateMoodReactor()
-            // Start idle action engine
             idleActions.start(penguinState: penguinState)
-            
-            // Option C: Check for pending fish to munch
             checkPendingFishPile()
+            // Parallax
+            if !reduceMotion {
+                parallaxMgr.start()
+                // Store timer — without this it is immediately deallocated and never fires
+                let mgr = parallaxMgr
+                parallaxTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { _ in
+                    if mgr.isActive {
+                        // Real device — use accelerometer data
+                        parallaxX = mgr.xOffset
+                        parallaxY = mgr.yOffset
+                    } else {
+                        // Simulator fallback — gentle synthetic sway so the effect is visible
+                        let t = Date.timeIntervalSinceReferenceDate
+                        parallaxX = sin(t * 0.4) * 14
+                        parallaxY = cos(t * 0.27) * 8
+                    }
+                }
+            }
         }
         .onDisappear {
             idleActions.stop()
+            parallaxMgr.stop()
+            parallaxTimer?.invalidate()
+            parallaxTimer = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: .nudgeDataChanged)) { _ in
             refreshActiveQueue()
@@ -220,7 +254,7 @@ struct NudgyHomeView: View {
         .onChange(of: NudgyVoiceOutput.shared.isSpeaking) { wasSpeaking, isSpeaking in
             // Auto-resume listening when TTS finishes in conversation mode
             if wasSpeaking && !isSpeaking && isVoiceConversation && awaitingTTSFinish {
-                print("🔄 Voice conversation: TTS finished (onChange), auto-resuming listening")
+                Log.ui.debug("Voice conversation: TTS finished (onChange), auto-resuming listening")
                 awaitingTTSFinish = false
                 Task {
                     // Give the audio system time to fully release the playback session
@@ -233,7 +267,7 @@ struct NudgyHomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .nudgyTTSSkipped)) { _ in
             // TTS was skipped (voice disabled) — auto-resume listening anyway
             guard isVoiceConversation && awaitingTTSFinish else { return }
-            print("🔄 Voice conversation: TTS skipped, auto-resuming listening")
+            Log.ui.debug("Voice conversation: TTS skipped, auto-resuming listening")
             awaitingTTSFinish = false
             Task {
                 try? await Task.sleep(for: .seconds(0.3))
@@ -256,7 +290,7 @@ struct NudgyHomeView: View {
                 AntarcticEnvironment(
                     mood: RewardService.shared.environmentMood,
                     unlockedProps: RewardService.shared.unlockedProps,
-                    fishCount: RewardService.shared.snowflakes,
+                    fishCount: RewardService.shared.fish,
                     level: RewardService.shared.level,
                     stage: StageTier.from(level: RewardService.shared.level),
                     sceneWidth: geo.size.width,
@@ -297,9 +331,67 @@ struct NudgyHomeView: View {
                             value: breatheAnimation
                         )
                 }
+
+                // Seasonal overlay — lightweight tint/particles based on current month
+                seasonalOverlay(width: geo.size.width, height: geo.size.height)
             }
         }
         .ignoresSafeArea()
+    }
+
+    // MARK: - Seasonal Overlay
+
+    @ViewBuilder
+    private func seasonalOverlay(width: CGFloat, height: CGFloat) -> some View {
+        let month = Calendar.current.component(.month, from: .now)
+        switch month {
+        case 12, 1, 2: // Winter — extra snow shimmer + cool blue tint
+            Rectangle()
+                .fill(Color(hex: "A8D8EA").opacity(0.04))
+                .ignoresSafeArea()
+            // Falling snowflake dots
+            ForEach(0..<18, id: \.self) { i in
+                let xFrac = CGFloat((i * 173 + 31) % 100) / 100.0
+                let yFrac = CGFloat((i * 97 + 13) % 100) / 100.0
+                Circle()
+                    .fill(Color.white.opacity(0.55))
+                    .frame(width: CGFloat((i % 3) + 2), height: CGFloat((i % 3) + 2))
+                    .offset(
+                        x: width * xFrac + (reduceMotion ? 0 : parallaxX * 0.05),
+                        y: height * yFrac + (breatheAnimation ? 4 : -4)
+                    )
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: Double(2 + i % 3)).repeatForever(autoreverses: true).delay(Double(i) * 0.18),
+                        value: breatheAnimation
+                    )
+            }
+
+        case 3, 4, 5: // Spring — warm golden shimmer
+            RadialGradient(
+                colors: [Color(hex: "FFE066").opacity(0.06), .clear],
+                center: .init(x: 0.5, y: 0.2),
+                startRadius: 0, endRadius: width * 0.6
+            )
+            .ignoresSafeArea()
+
+        case 6, 7, 8: // Summer — bright warm sun haze
+            LinearGradient(
+                colors: [Color(hex: "FF9100").opacity(0.05), .clear],
+                startPoint: .top, endPoint: .center
+            )
+            .ignoresSafeArea()
+
+        case 9, 10, 11: // Autumn — amber tint
+            RadialGradient(
+                colors: [Color(hex: "FF6D00").opacity(0.05), .clear],
+                center: .init(x: 0.3, y: 0.15),
+                startRadius: 0, endRadius: width * 0.55
+            )
+            .ignoresSafeArea()
+
+        default:
+            EmptyView()
+        }
     }
 
     // MARK: - Home Weather Layer
@@ -338,20 +430,31 @@ struct NudgyHomeView: View {
 
     private var nudgyCharacter: some View {
         ZStack {
+            // Mood ring — expression-reactive halo
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [moodRingColor.opacity(0.28), moodRingColor.opacity(0.08), .clear],
+                        center: .center,
+                        startRadius: 20,
+                        endRadius: 100
+                    )
+                )
+                .frame(width: 200, height: 200)
+                .blur(radius: 22)
+                .animation(.easeInOut(duration: 0.6), value: penguinState.expression)
+
             PenguinSceneView(
                 size: .hero,
                 onTap: {
                     moodReactor.userDidInteract()
-                    // Tapping Nudgy during conversation = end conversation
                     if isVoiceConversation {
                         endVoiceConversation()
                     } else if isListeningToUser {
                         stopListening()
                     } else if penguinState.isChatGenerating {
-                        // Nudgy is thinking — let the user know
                         HapticService.shared.prepare()
                     } else {
-                        // Tap = companion conversation (just talk)
                         startCompanionConversation()
                     }
                 },
@@ -362,14 +465,14 @@ struct NudgyHomeView: View {
                 }
             )
             .shiverEffect(moodReactor.isShivering && !isListeningToUser && !isVoiceConversation)
-            
+
             // Sleep z-bubbles when Nudgy is napping
             if moodReactor.isSleeping {
                 SleepBubble()
                     .offset(x: 30, y: -60)
                     .transition(.opacity)
             }
-            
+
             // Micro-reaction bubble (mood reactor)
             if let reaction = moodReactor.microReaction {
                 Text(reaction)
@@ -382,6 +485,22 @@ struct NudgyHomeView: View {
                     .transition(.opacity.combined(with: .offset(y: 10)))
             }
         }
+        // Parallax drift with device tilt
+        .offset(
+            x: reduceMotion ? 0 : parallaxX * 0.12,
+            y: reduceMotion ? 0 : parallaxY * 0.06
+        )
+        // Swipe up → show conversation history
+        .gesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    if value.translation.height < -30 && !penguinState.chatMessages.isEmpty {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            showHistory = true
+                        }
+                    }
+                }
+        )
     }
 
     // MARK: - Listening Indicator
@@ -512,8 +631,9 @@ struct NudgyHomeView: View {
 
                 // Tiny penguin avatar for Nudgy messages
                 if message.role == .nudgy {
-                    Text("🐧")
-                        .font(.system(size: 12))
+                    Image(systemName: "pawprint.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentActive)
                         .frame(width: 20, height: 20)
                         .offset(y: -2)
                 }
@@ -585,7 +705,7 @@ struct NudgyHomeView: View {
             // Celestial button (sun/moon) — expands into inventory overlay
             CelestialButton(
                 isExpanded: $showInventory,
-                fishCount: RewardService.shared.snowflakes,
+                fishCount: RewardService.shared.fish,
                 levelProgress: RewardService.shared.levelProgress
             )
         }
@@ -600,7 +720,7 @@ struct NudgyHomeView: View {
         let active = activeQueue.count
         let total = done + active
         let streak = RewardService.shared.currentStreak
-        let fish = RewardService.shared.snowflakes
+        let fish = RewardService.shared.fish
         
         return HStack(spacing: DesignTokens.spacingLG) {
             // Daily progress — "2 done · 3 to go"
@@ -670,13 +790,13 @@ struct NudgyHomeView: View {
             
             // Soft references, not "I REMEMBER THAT YOU..."
             if let name = memory.userName {
-                return String(localized: "Hey, \(name). 💙")
+                return String(localized: "Hey, \(name).")
             } else if fact.category == .personal {
-                return String(localized: "*remembers* …Hey. I was thinking about you 🐧")
+                return String(localized: "*remembers* …Hey. I was thinking about you.")
             } else if fact.category == .emotional {
-                return String(localized: "Hey. …How are you doing? 💙")
+                return String(localized: "Hey. …How are you doing?")
             } else {
-                return String(localized: "*perks up* Oh! Hey 🐧")
+                return String(localized: "*perks up* Oh! Hey.")
             }
         }
         
@@ -687,7 +807,7 @@ struct NudgyHomeView: View {
     private static let brainDumpGreetings: [String] = [
         "Unload time! Tell me everything!",
         "Let it all out! I'll catch every task!",
-        "Brain dump mode! Just talk, I'll sort it!",
+        "Unload mode! Just talk, I'll sort it!",
         "Ready! Say everything, I'll organize it!",
     ]
     
@@ -703,7 +823,7 @@ struct NudgyHomeView: View {
     /// Begin companion voice conversation — just talk to Nudgy, no forced task extraction.
     /// Mic starts IMMEDIATELY — no TTS greeting delay.
     private func startCompanionConversation() {
-        print("🎙️🔄 Starting companion voice conversation")
+        Log.ui.debug("Starting companion voice conversation")
         isVoiceConversation = true
         isBrainDumpVoice = false
         speechService.silenceAutoSendEnabled = true
@@ -721,7 +841,7 @@ struct NudgyHomeView: View {
     
     /// Begin brain dump voice conversation — task extraction mode with specialized prompt.
     private func startBrainDumpVoice() {
-        print("🎙️🔄 Starting brain dump voice conversation")
+        Log.ui.debug("Starting brain dump voice conversation")
         isVoiceConversation = true
         isBrainDumpVoice = true
         speechService.silenceAutoSendEnabled = true
@@ -741,7 +861,7 @@ struct NudgyHomeView: View {
     
     /// End voice conversation mode — stop everything
     private func endVoiceConversation() {
-        print("🎙️🔄 Ending voice conversation mode (brainDump=\(isBrainDumpVoice))")
+        Log.ui.debug("Ending voice conversation mode (brainDump=\(self.isBrainDumpVoice))")
         let wasBrainDump = isBrainDumpVoice
         
         isVoiceConversation = false
@@ -768,16 +888,16 @@ struct NudgyHomeView: View {
             if tasksCreated > 0 {
                 let summary: String
                 if tasksCreated == 1 {
-                    summary = String(localized: "All unloaded! Captured 1 task — go check your nudges! 🐧✨")
+                    summary = String(localized: "All unloaded! Captured 1 task — go check your nudges.")
                 } else {
-                    summary = String(localized: "All unloaded! Captured \(tasksCreated) tasks — they're all in your nudges! 🐧🎉")
+                    summary = String(localized: "All unloaded! Captured \(tasksCreated) tasks — they're all in your nudges.")
                 }
                 penguinState.say(summary, style: .announcement, autoDismiss: 5.0)
                 NudgyVoiceOutput.shared.speak(summary)
                 NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
             } else {
                 // Brain dump with no tasks — gentle, not transactional
-                let msg = String(localized: "Sometimes you just need to talk it out. I'm always here 💙")
+                let msg = String(localized: "Sometimes you just need to talk it out. I'm always here.")
                 penguinState.say(msg, autoDismiss: 3.5)
             }
         } else {
@@ -785,10 +905,10 @@ struct NudgyHomeView: View {
             NudgyEngine.shared.conversation.endConversation()
             penguinState.expression = .happy
             let goodbyes = [
-                "Talk anytime. I'm right here 🐧",
-                "*quiet nod* I'll be on my iceberg 💙",
-                "See you soon 🧊",
-                "I'm here whenever. …Always 🐧",
+                "Talk anytime. I'm right here.",
+                "*quiet nod* I'll be on my iceberg.",
+                "See you soon.",
+                "I'm here whenever. …Always.",
             ]
             let goodbye = goodbyes.randomElement()!
             penguinState.say(goodbye, autoDismiss: 3.0)
@@ -824,7 +944,7 @@ struct NudgyHomeView: View {
                 withAnimation { isListeningToUser = false }
                 penguinState.expression = .confused
                 penguinState.say(
-                    String(localized: "Please allow mic & speech access in Settings 🐧"),
+                    String(localized: "Please allow mic & speech access in Settings."),
                     autoDismiss: 4.0
                 )
                 if isVoiceConversation { endVoiceConversation() }
@@ -854,7 +974,7 @@ struct NudgyHomeView: View {
                 penguinState.say("🔴 \(error.localizedDescription)", autoDismiss: 8.0)
                 #else
                 penguinState.say(
-                    String(localized: "*taps ear* Hmm, my hearing is acting up. Type below instead! 🐧"),
+                    String(localized: "*taps ear* Hmm, my hearing is acting up. Try typing below."),
                     autoDismiss: 3.5
                 )
                 #endif
@@ -871,7 +991,7 @@ struct NudgyHomeView: View {
     private func stopListening() {
         // Grab transcript BEFORE stopping (stopRecording resets state)
         let transcript = speechService.liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        print("🎙️ stopListening: transcript='\(transcript)'")
+        Log.ui.debug("stopListening: transcript='\(transcript)'")
 
         // Mark as no longer listening FIRST to prevent handleSpeechStateChange from double-sending
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -883,7 +1003,7 @@ struct NudgyHomeView: View {
         guard !transcript.isEmpty else {
             penguinState.expression = .confused
             penguinState.say(
-                String(localized: "I didn't catch that — type it below instead! 🐧"),
+                String(localized: "I didn't catch that — try typing below."),
                 autoDismiss: 3.5
             )
             isInputFocused = true
@@ -903,7 +1023,7 @@ struct NudgyHomeView: View {
         case .silenceDetected(let transcript):
             // Auto-send from silence detection (conversation mode)
             // Note: don't guard on isListeningToUser — the teardown already set it false
-            print("🎙️🔄 Silence detected — auto-sending: '\(transcript.prefix(80))'")
+            Log.ui.debug("Silence detected — auto-sending: '\(transcript.prefix(80))'")
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 isListeningToUser = false
             }
@@ -934,7 +1054,7 @@ struct NudgyHomeView: View {
         case .emptySilence:
             // Long silence with no speech — end conversation
             guard isListeningToUser || isVoiceConversation else { return }
-            print("🎙️🔄 Empty silence — ending conversation")
+            Log.ui.debug("Empty silence — ending conversation")
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 isListeningToUser = false
             }
@@ -944,10 +1064,10 @@ struct NudgyHomeView: View {
         case .finished(let transcript):
             // Only handle if we're still listening (stopListening handles its own send)
             guard isListeningToUser else {
-                print("🎙️ .finished but already handled by stopListening")
+                Log.ui.debug(".finished but already handled by stopListening")
                 return
             }
-            print("🎙️ .finished auto-trigger (timer/limit reached)")
+            Log.ui.debug(".finished auto-trigger (timer/limit reached)")
             withAnimation { isListeningToUser = false }
             let cleaned = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleaned.isEmpty {
@@ -955,7 +1075,7 @@ struct NudgyHomeView: View {
                 sendToNudgy(cleaned)
             }
         case .error(let msg):
-            print("🎙️ Speech error: \(msg)")
+            Log.ui.error("Speech error: \(msg)")
             withAnimation { isListeningToUser = false }
             penguinState.expression = .confused
             #if DEBUG
@@ -963,7 +1083,7 @@ struct NudgyHomeView: View {
             penguinState.say("🔴 \(msg)", autoDismiss: 8.0)
             #else
             penguinState.say(
-                String(localized: "Mic trouble — type below instead! 🐧"),
+                String(localized: "Mic trouble — try typing below."),
                 autoDismiss: 3.0
             )
             #endif
@@ -982,15 +1102,15 @@ struct NudgyHomeView: View {
     /// Replaces the generic "Let me think..." with something that shows Nudgy heard you.
     private static let thinkingReactions: [(keywords: [String], reactions: [String])] = [
         (["tired", "exhausted", "drained", "burnt", "can't"],
-         ["*sits closer* …", "Mmm. I hear you…", "Hey… 💙"]),
+         ["*sits closer* …", "Mmm. I hear you…", "Hey…"]),
         (["stressed", "overwhelm", "anxious", "worry", "scared"],
-         ["*quiet nod*", "I'm here…", "Breathe… 💙"]),
+         ["*quiet nod*", "I'm here…", "Breathe…"]),
         (["happy", "great", "awesome", "good", "nice", "excited"],
-         ["Oh! 🐧", "*perks up*", "Ooh…"]),
+         ["Oh!", "*perks up*", "Ooh…"]),
         (["help", "how do", "what should", "can you"],
          ["Hmm…", "*tilts head*", "Let me see…"]),
         (["add", "create", "remind", "need to", "gotta", "have to"],
-         ["*grabs notepad*", "On it…", "📝"]),
+         ["*grabs notepad*", "On it…", "Got it."]),
     ]
     
     /// Pick a contextual micro-reaction based on what the user said.
@@ -1009,7 +1129,7 @@ struct NudgyHomeView: View {
     /// Nudgy responds via speech bubble + spoken voice (NOT chat bubbles).
     /// Routes through NudgyEngine for OpenAI-powered conversation with memory.
     private func sendToNudgy(_ text: String) {
-        print("💬 sendToNudgy: '\(text.prefix(80))' (conversation mode: \(isVoiceConversation), brainDump: \(isBrainDumpVoice))")
+        Log.ui.debug("sendToNudgy: '\(text.prefix(80))' (conversation mode: \(self.isVoiceConversation), brainDump: \(self.isBrainDumpVoice))")
 
         // Ensure we're in chat mode
         if penguinState.interactionMode != .chatting {
@@ -1067,8 +1187,20 @@ struct NudgyHomeView: View {
         let staleCount = activeQueue.filter { $0.accentStatus == .stale }.count
         let doneToday = grouped.doneToday.count
 
+        // Compute top category from active queue
+        let categoryCounts: [TaskCategory: Int] = activeQueue.reduce(into: [:]) { counts, item in
+            let cat = item.resolvedCategory
+            if cat != .general { counts[cat, default: 0] += 1 }
+        }
+        let topCat: (label: String, emoji: String, count: Int)? = categoryCounts
+            .max(by: { $0.value < $1.value })
+            .map { ($0.key.label, $0.key.emoji, $0.value) }
+
         // Record activity timestamp
         settings.recordActivity()
+        
+        // Phase 14: Build category context for category-aware proactive nudges
+        let catContext = CategoryNudgeContext.build(from: activeQueue, doneToday: grouped.doneToday)
         
         // ── ONE smart greeting that weaves in context ──
         // Instead of 8 queued bubbles, build one rich greeting.
@@ -1077,7 +1209,9 @@ struct NudgyHomeView: View {
             activeTaskCount: activeQueue.count,
             overdueCount: overdueCount,
             staleCount: staleCount,
-            doneToday: doneToday
+            doneToday: doneToday,
+            topCategory: topCat,
+            categoryContext: catContext
         )
         
         // ── At most ONE follow-up (delayed, not queued on top of greeting) ──
@@ -1086,8 +1220,22 @@ struct NudgyHomeView: View {
             guard self.penguinState.interactionMode != .chatting,
                   !self.isVoiceConversation else { return }
             
-            // Priority: welcome-back > streak > memory callback > evening review > check-in
+            // Priority: mood compassion > welcome-back > streak > memory callback > evening review > check-in
             // Only show ONE of these.
+
+            // Mood compassion — highest priority: if today's check-in was rough/awful, just be present
+            let todayKey = ISO8601DateFormatter().string(from: Calendar.current.startOfDay(for: Date()))
+            let storedMoodRaw = UserDefaults.standard.integer(forKey: "nudge_mood_\(todayKey)")
+            if storedMoodRaw > 0,
+               let todayMood = MoodLevel(rawValue: storedMoodRaw),
+               todayMood == .awful || todayMood == .rough {
+                let compassion: String = todayMood == .awful
+                    ? String(localized: "*sits closer* …Hey. I saw today feels awful. I'm right here.")
+                    : String(localized: "Hey. Today feeling rough? That's okay — I'm right here.")
+                penguinState.say(compassion, style: .speech, autoDismiss: 7.0)
+                return
+            }
+
             if let welcomeBack = NudgyEngine.shared.welcomeBack(settings: settings, activeQueue: activeQueue) {
                 penguinState.say(welcomeBack, style: .speech, autoDismiss: 5.0)
                 return
@@ -1140,17 +1288,17 @@ struct NudgyHomeView: View {
         switch fact.category {
         case .personal:
             if let name = memory.userName {
-                return String(localized: "I was thinking… it's nice knowing your name, \(name) 🐧")
+                return String(localized: "I was thinking… it's nice knowing your name, \(name).")
             }
-            return String(localized: "*adjusts scarf* …I remember things about you, you know 💙")
+            return String(localized: "*adjusts scarf* …I remember things about you, you know.")
         case .preference:
-            return String(localized: "I've been noticing your patterns. …Not in a creepy way. I'm a penguin 🧊")
+            return String(localized: "I've been noticing your patterns. …Not in a creepy way. I'm a penguin.")
         case .emotional:
-            return String(localized: "Hey. …Just wanted to check — how are you really doing? 💙")
+            return String(localized: "Hey. …Just wanted to check — how are you really doing?")
         case .behavioral:
-            return String(localized: "I notice things. …Like how you use this app. It's kind of nice 🐧")
+            return String(localized: "I notice things. …Like how you use this app. It's kind of nice.")
         case .contextual:
-            return String(localized: "*sits closer* …I feel like I know you a little better now 💙")
+            return String(localized: "*sits closer* …I feel like I know you a little better now.")
         }
     }
 
@@ -1183,9 +1331,6 @@ struct NudgyHomeView: View {
         default:      time = .night
         }
 
-        // Check for overdue tasks
-        let hasOverdue = activeQueue.contains { $0.accentStatus == .overdue }
-
         // Determine if user is actively interacting
         let isActive = isListeningToUser || isVoiceConversation || penguinState.isChatGenerating
 
@@ -1193,7 +1338,7 @@ struct NudgyHomeView: View {
             mood: RewardService.shared.environmentMood,
             timeOfDay: time,
             streak: RewardService.shared.currentStreak,
-            fishCount: RewardService.shared.snowflakes,
+            fishCount: RewardService.shared.fish,
             tasksToday: RewardService.shared.tasksCompletedToday,
             isUserActive: isActive
         )
@@ -1214,7 +1359,8 @@ struct NudgyHomeView: View {
         fishPileSpecies = RewardService.shared.lastFishCatch?.species ?? .catfish
         
         // Delay slightly so the view is settled before animation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.6))
             // Trigger the munch
             showFishPileMunch = true
             
@@ -1235,10 +1381,9 @@ struct NudgyHomeView: View {
             penguinState.pendingFishToMunch = 0
             
             // Return to ambient after animation
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                if penguinState.interactionMode == .ambient {
-                    penguinState.expression = .happy
-                }
+            try? await Task.sleep(for: .seconds(3.0))
+            if penguinState.interactionMode == .ambient {
+                penguinState.expression = .happy
             }
         }
     }

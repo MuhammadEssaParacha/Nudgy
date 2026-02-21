@@ -25,6 +25,9 @@ struct SwipeableRow<Content: View>: View {
     var leadingIcon: String = "checkmark"
     var leadingColor: Color = DesignTokens.accentComplete
     
+    /// Optional category color — when provided, blends into the leading swipe for a category-tinted "done" flash.
+    var categoryColor: Color?
+    
     /// Action triggered on full swipe left (trailing)
     var onSwipeTrailing: (() -> Void)?
     var trailingLabel: String = "Snooze"
@@ -37,6 +40,14 @@ struct SwipeableRow<Content: View>: View {
     
     private let triggerThreshold: CGFloat = 100
     private let buttonRevealWidth: CGFloat = 70
+    
+    /// Effective leading color — blends category color when past threshold.
+    private var effectiveLeadingColor: Color {
+        guard let catColor = categoryColor else { return leadingColor }
+        let progress = min(1.0, Double(offset) / Double(triggerThreshold))
+        // Blend from standard green → category color as swipe progresses
+        return progress > 0.6 ? catColor : leadingColor
+    }
     
     private enum SwipeDirection {
         case none, leading, trailing
@@ -63,7 +74,7 @@ struct SwipeableRow<Content: View>: View {
                     .frame(width: max(0, offset), alignment: .trailing)
                     .frame(maxHeight: .infinity)
                     .background(
-                        leadingColor.opacity(min(1.0, Double(offset) / Double(triggerThreshold)))
+                        effectiveLeadingColor.opacity(min(1.0, Double(offset) / Double(triggerThreshold)))
                     )
                     .clipShape(
                         UnevenRoundedRectangle(
@@ -173,7 +184,7 @@ struct SwipeableRow<Content: View>: View {
             SwipeableRow(
                 content: {
                     HStack {
-                        Text("📬 Email Sarah about meeting")
+                        Text("Email Sarah about meeting")
                             .foregroundStyle(.white)
                         Spacer()
                     }
@@ -187,7 +198,7 @@ struct SwipeableRow<Content: View>: View {
             SwipeableRow(
                 content: {
                     HStack {
-                        Text("🐶 Buy dog food")
+                        Text("Buy dog food")
                             .foregroundStyle(.white)
                         Spacer()
                     }

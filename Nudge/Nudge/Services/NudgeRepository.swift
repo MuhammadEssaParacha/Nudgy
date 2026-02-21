@@ -7,6 +7,7 @@
 
 import SwiftData
 import SwiftUI
+import os
 
 /// Central data access layer for NudgeItem CRUD and ordering.
 /// All SwiftData queries go through here — views never touch ModelContext directly.
@@ -38,7 +39,7 @@ final class NudgeRepository {
             let items = try modelContext.fetch(descriptor)
             return prioritize(items)
         } catch {
-            print("❌ Failed to fetch active queue: \(error)")
+            Log.data.error("Failed to fetch active queue: \(error, privacy: .public)")
             return []
         }
     }
@@ -64,13 +65,19 @@ final class NudgeRepository {
         do {
             return try modelContext.fetch(descriptor)
         } catch {
-            print("❌ Failed to fetch snoozed items: \(error)")
+            Log.data.error("Failed to fetch snoozed items: \(error, privacy: .public)")
             return []
         }
     }
     
     /// Fetch items completed today
     func fetchCompletedToday() -> [NudgeItem] {
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+        return fetchCompletedInRange(from: startOfDay, to: Date.distantFuture)
+    }
+    
+    /// Fetch items completed within a date range (for mood insight category breakdown)
+    func fetchCompletedInRange(from start: Date, to end: Date) -> [NudgeItem] {
         let predicate = #Predicate<NudgeItem> {
             $0.statusRaw == "done"
         }
@@ -82,14 +89,13 @@ final class NudgeRepository {
         
         do {
             let items = try modelContext.fetch(descriptor)
-            // Filter in-memory to avoid force-unwrapping optionals in #Predicate
-            let startOfDay = Calendar.current.startOfDay(for: Date())
+            // Filter in-memory — can't unwrap Date? in #Predicate
             return items.filter { item in
                 guard let completedAt = item.completedAt else { return false }
-                return completedAt >= startOfDay
+                return completedAt >= start && completedAt < end
             }
         } catch {
-            print("❌ Failed to fetch completed items: \(error)")
+            Log.data.error("Failed to fetch completed items: \(error, privacy: .public)")
             return []
         }
     }
@@ -101,6 +107,46 @@ final class NudgeRepository {
             snoozed: fetchSnoozed(),
             doneToday: fetchCompletedToday()
         )
+    }
+    
+    // MARK: - Category Streaks
+    
+    /// Compute per-category consecutive-day streaks looking back up to 14 days.
+    /// Returns an array of (category, days) sorted by longest streak first.
+    func categoryStreaks() -> [(category: TaskCategory, days: Int)] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        
+        // Fetch all done items from the last 14 days
+        guard let twoWeeksAgo = calendar.date(byAdding: .day, value: -14, to: today) else { return [] }
+        let completed = fetchCompletedInRange(from: twoWeeksAgo, to: .distantFuture)
+        
+        // Group completed items by category, then by day
+        var categoryDays: [TaskCategory: Set<Int>] = [:]  // category → set of day-offsets (0=today, 1=yesterday, ...)
+        for item in completed {
+            guard let date = item.completedAt else { continue }
+            let cat = item.resolvedCategory
+            guard cat != .general else { continue }
+            let dayOffset = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: today).day ?? 0
+            categoryDays[cat, default: []].insert(dayOffset)
+        }
+        
+        // For each category, count consecutive days starting from today (day 0)
+        var streaks: [(category: TaskCategory, days: Int)] = []
+        for (cat, days) in categoryDays {
+            guard days.contains(0) else { continue } // Must include today
+            var streak = 1
+            var offset = 1
+            while days.contains(offset) {
+                streak += 1
+                offset += 1
+            }
+            if streak >= 2 {
+                streaks.append((category: cat, days: streak))
+            }
+        }
+        
+        return streaks.sorted { $0.days > $1.days }
     }
     
     // MARK: - Resurface Snoozed Items
@@ -129,7 +175,33 @@ final class NudgeRepository {
                 save()
             }
         } catch {
-            print("❌ Failed to resurface snoozed items: \(error)")
+            Log.data.error("Failed to resurface snoozed items: \(error, privacy: .public)")
+        }
+    }
+    
+    /// Backfill categories for existing tasks that don't have one assigned yet.
+    /// Safe to call repeatedly — only processes items where `categoryRaw` is nil.
+    func backfillCategories() {
+        // Fetch all items with no category
+        let descriptor = FetchDescriptor<NudgeItem>(
+            predicate: #Predicate<NudgeItem> { $0.categoryRaw == nil }
+        )
+        
+        do {
+            let uncategorized = try modelContext.fetch(descriptor)
+            guard !uncategorized.isEmpty else { return }
+            
+            for item in uncategorized {
+                let detected = CategoryClassifier.classify(
+                    content: item.content,
+                    actionType: item.actionType
+                )
+                item.category = detected
+            }
+            save()
+            Log.data.info("Backfilled categories for \(uncategorized.count) tasks")
+        } catch {
+            Log.data.error("Failed to backfill categories: \(error, privacy: .public)")
         }
     }
     
@@ -144,9 +216,11 @@ final class NudgeRepository {
         contactName: String?,
         priority: TaskPriority? = nil,
         dueDate: Date? = nil,
+        category: TaskCategory? = nil,
         brainDump: BrainDump
     ) -> NudgeItem {
         let maxOrder = fetchMaxSortOrder()
+        let resolved = category ?? CategoryClassifier.classify(content: content, actionType: actionType)
         let item = NudgeItem(
             content: content,
             sourceType: .voiceDump,
@@ -156,7 +230,8 @@ final class NudgeRepository {
             contactName: contactName,
             sortOrder: maxOrder + 1,
             priority: priority,
-            dueDate: dueDate
+            dueDate: dueDate,
+            category: resolved
         )
         item.brainDump = brainDump
         modelContext.insert(item)
@@ -168,9 +243,11 @@ final class NudgeRepository {
         content: String,
         url: String?,
         preview: String?,
-        snoozedUntil: Date
+        snoozedUntil: Date,
+        category: TaskCategory? = nil
     ) -> NudgeItem {
         let maxOrder = fetchMaxSortOrder()
+        let resolved = category ?? CategoryClassifier.classify(content: content, actionType: url != nil ? .openLink : nil)
         let item = NudgeItem(
             content: content,
             sourceType: .share,
@@ -178,7 +255,8 @@ final class NudgeRepository {
             sourcePreview: preview,
             actionType: url != nil ? .openLink : nil,
             actionTarget: url,
-            sortOrder: maxOrder + 1
+            sortOrder: maxOrder + 1,
+            category: resolved
         )
         item.snooze(until: snoozedUntil)
         modelContext.insert(item)
@@ -189,10 +267,12 @@ final class NudgeRepository {
     /// Insert a manually created item
     func createManual(content: String) -> NudgeItem {
         let maxOrder = fetchMaxSortOrder()
+        let category = CategoryClassifier.classify(content: content, actionType: nil)
         let item = NudgeItem(
             content: content,
             sourceType: .manual,
-            sortOrder: maxOrder + 1
+            sortOrder: maxOrder + 1,
+            category: category
         )
         modelContext.insert(item)
         save()
@@ -207,9 +287,11 @@ final class NudgeRepository {
         actionTarget: String? = nil,
         contactName: String?,
         priority: TaskPriority? = nil,
-        dueDate: Date? = nil
+        dueDate: Date? = nil,
+        category: TaskCategory? = nil
     ) -> NudgeItem {
         let maxOrder = fetchMaxSortOrder()
+        let resolved = category ?? CategoryClassifier.classify(content: content, actionType: actionType)
         let item = NudgeItem(
             content: content,
             sourceType: .manual,
@@ -219,7 +301,8 @@ final class NudgeRepository {
             contactName: contactName,
             sortOrder: maxOrder + 1,
             priority: priority,
-            dueDate: dueDate
+            dueDate: dueDate,
+            category: resolved
         )
         modelContext.insert(item)
         save()
@@ -230,7 +313,9 @@ final class NudgeRepository {
     
     /// Mark item as done
     func markDone(_ item: NudgeItem) {
+        let created = item.createdAt
         item.markDone()
+        NudgyMemory.shared.trackCategoryCompletion(item.resolvedCategory, createdAt: created)
         save()
     }
     
@@ -332,18 +417,20 @@ final class NudgeRepository {
             let pendingItems = try JSONDecoder().decode([ShareExtensionPayload].self, from: data)
             
             for payload in pendingItems {
+                let cat = payload.category.flatMap { TaskCategory(rawValue: $0) }
                 _ = createFromShare(
                     content: payload.content,
                     url: payload.url,
                     preview: payload.preview,
-                    snoozedUntil: payload.snoozedUntil
+                    snoozedUntil: payload.snoozedUntil,
+                    category: cat
                 )
             }
             
             // Clear after ingestion
             defaults.removeObject(forKey: AppGroupID.pendingItemsKey)
         } catch {
-            print("❌ Failed to ingest share extension items: \(error)")
+            Log.data.error("Failed to ingest share extension items: \(error, privacy: .public)")
         }
     }
     
@@ -360,20 +447,112 @@ final class NudgeRepository {
         return items.first?.sortOrder ?? 0
     }
     
-    /// Prioritize items: due times → overdue → stale → recent → snoozed resurfacing
+    /// Prioritize items using time-aware scoring:
+    /// 1. Overdue items (past due date)
+    /// 2. Due today with specific time (nearest first)
+    /// 3. Scheduled for now (scheduledTime proximity)
+    /// 4. Due today (no specific time)
+    /// 5. Stale items (3+ days untouched)
+    /// 6. Due tomorrow
+    /// 7. Energy-matched items for current time-of-day
+    /// 8. Everything else by sortOrder
     private func prioritize(_ items: [NudgeItem]) -> [NudgeItem] {
-        items.sorted { a, b in
-            // Overdue items first
-            if a.isOverdue && !b.isOverdue { return true }
-            if !a.isOverdue && b.isOverdue { return false }
-            
-            // Stale items (3+ days) before non-stale
-            if a.isStale && !b.isStale { return true }
-            if !a.isStale && b.isStale { return false }
-            
-            // Then by sortOrder
+        let now = Date()
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: now)
+        let currentEnergy = EnergyScheduler.energyBucket(for: hour)
+
+        return items.sorted { a, b in
+            let scoreA = urgencyScore(a, now: now, calendar: calendar, currentEnergy: currentEnergy)
+            let scoreB = urgencyScore(b, now: now, calendar: calendar, currentEnergy: currentEnergy)
+
+            if scoreA != scoreB { return scoreA > scoreB }
+
+            // Tiebreak: closer scheduledTime wins
+            if let aTime = a.scheduledTime, let bTime = b.scheduledTime {
+                return abs(aTime.timeIntervalSince(now)) < abs(bTime.timeIntervalSince(now))
+            }
+
             return a.sortOrder < b.sortOrder
         }
+    }
+
+    /// Compute a numeric urgency score for sorting. Higher = more urgent.
+    private func urgencyScore(
+        _ item: NudgeItem,
+        now: Date,
+        calendar: Calendar,
+        currentEnergy: EnergyLevel
+    ) -> Int {
+        var score = 0
+
+        // Tier 1: Overdue due date (past deadline)
+        if let dueDate = item.dueDate, dueDate < now {
+            score += 100
+            // More overdue = higher urgency
+            let hoursOverdue = Int(now.timeIntervalSince(dueDate) / 3600)
+            score += min(hoursOverdue, 20)
+        }
+
+        // Tier 1b: Snoozed and overdue (resurfaced)
+        if item.isOverdue {
+            score += 90
+        }
+
+        // Tier 2: Scheduled time within next 2 hours
+        if let scheduled = item.scheduledTime {
+            let delta = scheduled.timeIntervalSince(now)
+            if delta >= -1800 && delta <= 7200 { // -30min to +2h window
+                score += 70
+                // Closer = higher
+                let minutesAway = Int(abs(delta) / 60)
+                score += max(0, 30 - minutesAway)
+            } else if delta > 0 && delta <= 14400 { // 2-4h away
+                score += 40
+            }
+        }
+
+        // Tier 3: Due today
+        if let dueDate = item.dueDate, calendar.isDateInToday(dueDate) {
+            score += 60
+        }
+
+        // Tier 4: Stale items (untouched 3+ days)
+        if item.isCategoryStale {
+            score += 35
+            // Staler = more urgent
+            score += min(item.ageInDays, 10)
+        } else if item.isStale {
+            score += 30
+        }
+
+        // Tier 5: Due tomorrow
+        if let dueDate = item.dueDate, calendar.isDateInTomorrow(dueDate) {
+            score += 25
+        }
+
+        // Tier 6: Due this week (but not today/tomorrow)
+        if let dueDate = item.dueDate,
+           !calendar.isDateInToday(dueDate),
+           !calendar.isDateInTomorrow(dueDate),
+           dueDate > now {
+            let daysUntilDue = calendar.dateComponents([.day], from: now, to: dueDate).day ?? 99
+            if daysUntilDue <= 7 {
+                score += max(0, 20 - daysUntilDue * 2)
+            }
+        }
+
+        // Tier 7: Energy match bonus
+        if let energy = item.energyLevel, energy == currentEnergy {
+            score += 10
+        }
+
+        // Tier 8: Quick win in afternoon (< 15 min)
+        if let mins = item.estimatedMinutes, mins <= 15, (12...17).contains(calendar.component(.hour, from: now)) {
+            score += 5
+        }
+
+        return score
     }
     
     private func save() {
@@ -381,7 +560,7 @@ final class NudgeRepository {
             try modelContext.save()
             NotificationCenter.default.post(name: .nudgeDataChanged, object: nil)
         } catch {
-            print("❌ SwiftData save failed: \(error)")
+            Log.data.error("SwiftData save failed: \(error, privacy: .public)")
         }
     }
 }
@@ -396,6 +575,7 @@ struct ShareExtensionPayload: Codable {
     let preview: String?
     let snoozedUntil: Date
     let savedAt: Date
+    let category: String?
 }
 
 // MARK: - App Group Constants

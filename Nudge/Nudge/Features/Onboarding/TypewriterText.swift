@@ -295,7 +295,8 @@ struct FishBurst: View {
             
             // Stagger each fish with varying delay
             let delay = Double(i) * 0.06
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(delay))
                 if let idx = fishParticles.firstIndex(where: { $0.id == particle.id }) {
                     // Pop out with bouncy spring
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
@@ -306,21 +307,19 @@ struct FishBurst: View {
                     }
                     
                     // Gravity: fish drift downward after peaking
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        withAnimation(.easeIn(duration: 0.8)) {
-                            if let idx = fishParticles.firstIndex(where: { $0.id == particle.id }) {
-                                fishParticles[idx].offsetY += 60
-                                fishParticles[idx].rotation += Double.random(in: -20...20)
-                            }
+                    try? await Task.sleep(for: .seconds(0.5))
+                    withAnimation(.easeIn(duration: 0.8)) {
+                        if let idx = fishParticles.firstIndex(where: { $0.id == particle.id }) {
+                            fishParticles[idx].offsetY += 60
+                            fishParticles[idx].rotation += Double.random(in: -20...20)
                         }
                     }
                     
                     // Fade out
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        withAnimation(.easeOut(duration: 0.4)) {
-                            if let idx = fishParticles.firstIndex(where: { $0.id == particle.id }) {
-                                fishParticles[idx].opacity = 0
-                            }
+                    try? await Task.sleep(for: .seconds(0.5))
+                    withAnimation(.easeOut(duration: 0.4)) {
+                        if let idx = fishParticles.firstIndex(where: { $0.id == particle.id }) {
+                            fishParticles[idx].opacity = 0
                         }
                     }
                 }

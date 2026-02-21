@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import os
 
 // MARK: - Extracted Task
 
@@ -28,6 +29,7 @@ struct ExtractedTask: Codable {
         case "CALL": return .call
         case "TEXT": return .text
         case "EMAIL": return .email
+        case "ALARM": return .setAlarm
         default: return nil
         }
     }
@@ -116,7 +118,7 @@ struct ExtractedTask: Codable {
         // Extract hour from dueDateString for today
         let hourPattern = /(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/
         if let match = raw.firstMatch(of: hourPattern) {
-            var hour = Int(match.1)!
+            guard var hour = Int(match.1) else { return nil }
             if let ampm = match.3 {
                 if ampm == "pm" && hour < 12 { hour += 12 }
                 if ampm == "am" && hour == 12 { hour = 0 }
@@ -206,6 +208,7 @@ final class NudgyTaskExtractor {
             
             return fallbackExtraction(input)
         } catch {
+            Log.ai.warning("[TaskExtractor] extractTask failed, using fallback: \(error, privacy: .public)")
             return fallbackExtraction(input)
         }
     }
@@ -293,18 +296,18 @@ final class NudgyTaskExtractor {
             
             if let data = cleaned.data(using: .utf8),
                let taskList = try? JSONDecoder().decode(ExtractedTaskList.self, from: data) {
-                print("[TaskExtractor] Extracted \(taskList.tasks.count) tasks from brain dump:")
+                Log.ai.debug("[TaskExtractor] Extracted \(taskList.tasks.count) tasks from brain dump")
                 for (i, task) in taskList.tasks.enumerated() {
-                    print("  [\(i+1)] \(task.priority.uppercased()) | \(task.emoji) \(task.content) | due: \(task.dueDateString.isEmpty ? "—" : task.dueDateString) | action: \(task.actionType.isEmpty ? "—" : task.actionType) \(task.contactName)")
+                    Log.ai.debug("  [\(i+1)] \(task.priority.uppercased()) | \(task.emoji) \(task.content) | due: \(task.dueDateString.isEmpty ? "—" : task.dueDateString) | action: \(task.actionType.isEmpty ? "—" : task.actionType) \(task.contactName)")
                 }
                 return taskList.tasks.isEmpty ? [fallbackExtraction(transcript)] : taskList.tasks
             }
             
-            print("[TaskExtractor] Failed to decode JSON, raw response:\n\(cleaned)")
+            Log.ai.warning("[TaskExtractor] Failed to decode JSON, raw response: \(cleaned)")
             return [fallbackExtraction(transcript)]
         } catch {
             // OpenAI failed — try Apple FM before giving up
-            print("❌ [TaskExtractor] OpenAI failed: \(error.localizedDescription). Trying Apple FM fallback...")
+            Log.ai.error("[TaskExtractor] OpenAI failed: \(error, privacy: .public). Trying Apple FM fallback...")
             return await appleFMSplitFallback(transcript: transcript)
         }
     }
@@ -332,6 +335,7 @@ final class NudgyTaskExtractor {
                 )
             }
         } catch {
+            Log.ai.warning("[TaskExtractor] splitBrainDump failed, using fallback: \(error, privacy: .public)")
             return [fallbackExtraction(transcript)]
         }
         #else
@@ -351,8 +355,9 @@ final class NudgyTaskExtractor {
         
         if currentDay >= day {
             // The day has passed this month, use next month
-            comps.month = (comps.month ?? 1) + 1
-            if comps.month! > 12 {
+            let nextMonth = (comps.month ?? 1) + 1
+            comps.month = nextMonth
+            if nextMonth > 12 {
                 comps.month = 1
                 comps.year = (comps.year ?? 2026) + 1
             }
@@ -373,13 +378,16 @@ final class NudgyTaskExtractor {
         taskContent: String,
         actionType: String,
         contactName: String?,
-        senderName: String?
+        senderName: String?,
+        categoryLabel: String? = nil
     ) async -> (draft: String, subject: String)? {
         guard NudgyConfig.isAvailable else { return nil }
         
         do {
             let senderLine = senderName.flatMap { $0.isEmpty ? nil : $0 }
                 .map { "\nSender name: \"\($0)\"" } ?? ""
+            let categoryLine = categoryLabel.flatMap { $0.isEmpty ? nil : $0 }
+                .map { "\nCategory: \($0) (adapt tone to match this life area)" } ?? ""
             
             let response = try await NudgyLLMService.shared.generate(
                 systemPrompt: """
@@ -390,7 +398,7 @@ final class NudgyTaskExtractor {
                 userPrompt: """
                 Write a \(actionType.lowercased()) for:
                 Task: "\(taskContent)"
-                Recipient: "\(contactName ?? "the person mentioned")"\(senderLine)
+                Recipient: "\(contactName ?? "the person mentioned")"\(senderLine)\(categoryLine)
                 """,
                 model: NudgyConfig.OpenAI.extractionModel,
                 temperature: 0.7
@@ -410,10 +418,11 @@ final class NudgyTaskExtractor {
             
             return nil
         } catch {
+            Log.ai.warning("[TaskExtractor] draftMessage failed: \(error, privacy: .public)")
             return nil
         }
     }
-    
+
     // MARK: - Fallback
     
     private func fallbackExtraction(_ input: String) -> ExtractedTask {

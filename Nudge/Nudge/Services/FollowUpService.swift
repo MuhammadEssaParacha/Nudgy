@@ -13,6 +13,7 @@
 //
 
 import SwiftData
+import os
 import Foundation
 
 // MARK: - Follow-Up Templates
@@ -135,7 +136,7 @@ enum FollowUpService {
             modelContext: modelContext
         ) {
             modelContext.insert(followUp)
-            try? modelContext.save()
+            do { try modelContext.save() } catch { Log.services.error("[FollowUp] Save failed: \(error, privacy: .public)") }
         }
     }
     

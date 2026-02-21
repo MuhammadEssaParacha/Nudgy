@@ -159,8 +159,9 @@ final class PenguinMoodReactor {
 
         // Clear micro-reaction after a delay
         if microReaction != nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
-                self?.microReaction = nil
+            Task {
+                try? await Task.sleep(for: .seconds(4.0))
+                self.microReaction = nil
             }
         }
     }

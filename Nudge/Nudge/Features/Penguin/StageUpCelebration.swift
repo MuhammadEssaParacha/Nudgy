@@ -13,7 +13,7 @@
 //    6. Nudgy does a happy dance (expression = .celebrating)
 //    7. Auto-dismisses after 3.5 seconds, or tap to dismiss
 //
-//  Triggered by RewardService when lifetimeSnowflakes crosses a tier boundary.
+//  Triggered by RewardService when lifetimeFish crosses a tier boundary.
 //
 
 import SwiftUI
@@ -47,6 +47,7 @@ struct StageUpCelebration: View {
     @State private var particles: [CelebrationParticle] = []
     @State private var particleTimer: Timer?
     @State private var badgeScale: CGFloat = 0.3
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let celebrationColors: [Color] = [
         Color(hex: "FFD700"),  // Gold
@@ -190,36 +191,48 @@ struct StageUpCelebration: View {
     // MARK: - Celebration Sequence
 
     private func runCelebrationSequence() {
+        if reduceMotion {
+            // Accessibility: show badge instantly, no confetti
+            showVignette = true
+            showBadge = true
+            badgeScale = 1.0
+            showText = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(3.0))
+                dismiss()
+            }
+            return
+        }
+
         // Step 1: Vignette (0ms)
         withAnimation(.easeIn(duration: 0.3)) {
             showVignette = true
         }
 
-        // Step 2: Particle burst (200ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        // Steps 2–5 as sequential Task
+        Task { @MainActor in
+            // Step 2: Particle burst (200ms)
+            try? await Task.sleep(for: .seconds(0.2))
             spawnConfetti()
             withAnimation(.spring(response: 0.1)) {
                 showBurst = true
             }
-        }
 
-        // Step 3: Badge scales in (400ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            // Step 3: Badge scales in (400ms from start = 200ms after step 2)
+            try? await Task.sleep(for: .seconds(0.2))
             showBadge = true
             withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
                 badgeScale = 1.0
             }
-        }
 
-        // Step 4: Text fades in (800ms)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            // Step 4: Text fades in (800ms from start = 400ms after step 3)
+            try? await Task.sleep(for: .seconds(0.4))
             withAnimation(.easeOut(duration: 0.4)) {
                 showText = true
             }
-        }
 
-        // Step 5: Auto-dismiss (4 seconds)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            // Step 5: Auto-dismiss (4s from start = 3.2s after step 4)
+            try? await Task.sleep(for: .seconds(3.2))
             dismiss()
         }
     }
@@ -232,7 +245,8 @@ struct StageUpCelebration: View {
             showBurst = false
             showText = false
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.35))
             onDismiss()
         }
     }
@@ -241,8 +255,8 @@ struct StageUpCelebration: View {
 
     private func spawnConfetti() {
         let screenCenter = CGPoint(
-            x: UIScreen.main.bounds.midX,
-            y: UIScreen.main.bounds.midY - 40
+            x: UIScreen.current.bounds.midX,
+            y: UIScreen.current.bounds.midY - 40
         )
 
         // Initial burst

@@ -90,8 +90,9 @@ struct TabBarNudgyChomp: View {
                 
                 // Heart
                 if showHeart {
-                    Text("❤️")
-                        .font(.system(size: 10))
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.pink)
                         .offset(x: 14, y: peekOffset - 18 + heartOffset)
                         .opacity(heartOpacity)
                 }

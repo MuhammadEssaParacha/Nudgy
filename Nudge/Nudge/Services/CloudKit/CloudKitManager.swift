@@ -1,5 +1,6 @@
 import Foundation
 import CloudKit
+import os
 
 @MainActor
 final class CloudKitManager {
@@ -32,9 +33,7 @@ final class CloudKitManager {
         // embedded provisioning profile / signed entitlements. Without this,
         // CKContainer.default() will trap at runtime.
         guard hasCloudKitEntitlement() else {
-            #if DEBUG
-            print("⚠️ CloudKitManager: CloudKit entitlement missing — skipping")
-            #endif
+            Log.sync.warning("CloudKitManager: CloudKit entitlement missing — skipping")
             return nil
         }
 

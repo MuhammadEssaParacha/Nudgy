@@ -50,7 +50,8 @@ extension View {
     /// Announce a state change to VoiceOver (e.g., "Task completed", "Recording started").
     func nudgeAnnouncement(_ message: String) -> some View {
         self.onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.5))
                 UIAccessibility.post(
                     notification: .announcement,
                     argument: message

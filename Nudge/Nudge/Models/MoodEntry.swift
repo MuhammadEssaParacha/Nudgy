@@ -19,6 +19,18 @@ enum MoodLevel: Int, Codable, CaseIterable {
     case good      = 4
     case great     = 5
     
+    /// SF Symbol icon for mood display.
+    var icon: String {
+        switch self {
+        case .awful: return "cloud.bolt.rain.fill"
+        case .rough: return "cloud.drizzle.fill"
+        case .okay:  return "cloud.fill"
+        case .good:  return "sun.max.fill"
+        case .great: return "sparkles"
+        }
+    }
+    
+    /// Deprecated — use `icon` + `color` for rendering.
     var emoji: String {
         switch self {
         case .awful: return "😫"

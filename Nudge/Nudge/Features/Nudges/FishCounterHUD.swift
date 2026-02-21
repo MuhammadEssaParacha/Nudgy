@@ -16,7 +16,7 @@ import SwiftUI
 struct FishCounterHUD: View {
     
     let fishToday: Int
-    let snowflakes: Int
+    let fish: Int
     let species: FishSpecies?
     
     /// Binding to report the HUD's screen position for flying fish targeting.
@@ -102,11 +102,11 @@ struct FishCounterHUD: View {
             
             let earned = newValue - oldValue
             triggerBounce()
-            showFloatingText("+\(earned) 🐟")
+            showFloatingText("+\(earned)")
             previousFishToday = newValue
         }
         .nudgeAccessibility(
-            label: String(localized: "\(fishToday) fish earned today, \(snowflakes) snowflakes total"),
+            label: String(localized: "\(fishToday) fish earned today, \(fish) fish total"),
             traits: .isStaticText
         )
     }
@@ -120,7 +120,8 @@ struct FishCounterHUD: View {
         withAnimation(.easeOut(duration: 0.4)) {
             showSparkle = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.4))
             showSparkle = false
         }
         
@@ -128,7 +129,8 @@ struct FishCounterHUD: View {
         withAnimation(.spring(response: 0.25, dampingFraction: 0.4)) {
             bounceScale = 1.3
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.2))
             withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                 bounceScale = 1.0
             }
@@ -145,7 +147,8 @@ struct FishCounterHUD: View {
             floatingOpacity = 0
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.0))
             floatingText = nil
         }
     }
@@ -157,8 +160,8 @@ struct FishCounterHUD: View {
     ZStack {
         Color.black.ignoresSafeArea()
         VStack(spacing: 20) {
-            FishCounterHUD(fishToday: 3, snowflakes: 42, species: .tropical)
-            FishCounterHUD(fishToday: 0, snowflakes: 0, species: nil)
+            FishCounterHUD(fishToday: 3, fish: 42, species: .tropical)
+            FishCounterHUD(fishToday: 0, fish: 0, species: nil)
         }
     }
     .preferredColorScheme(.dark)

@@ -9,6 +9,8 @@
 
 import UserNotifications
 import UIKit
+import Intents
+import os
 
 final class NotificationService: NSObject {
     
@@ -69,7 +71,7 @@ final class NotificationService: NSObject {
             
             return granted
         } catch {
-            print("❌ Notification permission error: \(error)")
+            Log.notify.error("Notification permission error: \(error, privacy: .public)")
             return false
         }
     }
@@ -96,17 +98,17 @@ final class NotificationService: NSObject {
         let snoozedCallActions = [
             UNNotificationAction(
                 identifier: Action.callNow.rawValue,
-                title: String(localized: "📞 Call Now"),
+                title: String(localized: "Call Now"),
                 options: [.foreground]
             ),
             UNNotificationAction(
                 identifier: Action.sendText.rawValue,
-                title: String(localized: "💬 Send Text"),
+                title: String(localized: "Send Text"),
                 options: [.foreground]
             ),
             UNNotificationAction(
                 identifier: Action.snoozeTomorrow.rawValue,
-                title: String(localized: "⏰ Tomorrow"),
+                title: String(localized: "Tomorrow"),
                 options: [.destructive]
             ),
         ]
@@ -115,13 +117,32 @@ final class NotificationService: NSObject {
         let staleActions = [
             UNNotificationAction(
                 identifier: Action.markDone.rawValue,
-                title: String(localized: "Done ✓"),
+                title: String(localized: "Done"),
                 options: [.foreground]
             ),
             UNNotificationAction(
                 identifier: Action.snoozeTomorrow.rawValue,
                 title: String(localized: "Tomorrow"),
                 options: [.destructive]
+            ),
+        ]
+        
+        // Alarm
+        let alarmActions = [
+            UNNotificationAction(
+                identifier: Action.viewItem.rawValue,
+                title: String(localized: "View Task"),
+                options: [.foreground]
+            ),
+            UNNotificationAction(
+                identifier: "SNOOZE_5MIN",
+                title: String(localized: "Snooze 5 min"),
+                options: []
+            ),
+            UNNotificationAction(
+                identifier: Action.markDone.rawValue,
+                title: String(localized: "Done"),
+                options: [.foreground]
             ),
         ]
         
@@ -155,19 +176,91 @@ final class NotificationService: NSObject {
                 actions: eodActions,
                 intentIdentifiers: []
             ),
+            UNNotificationCategory(
+                identifier: "ALARM",
+                actions: alarmActions,
+                intentIdentifiers: []
+            ),
         ]
         
         center.setNotificationCategories(categories)
         center.delegate = self
     }
     
+    // MARK: - Communication Notification Helper
+    
+    /// Wrap a notification as a communication notification from Nudgy.
+    /// This makes the notification appear with Nudgy's avatar, styled like a message.
+    private func wrapAsCommunication(_ content: UNMutableNotificationContent) -> UNMutableNotificationContent {
+        let handle = INPersonHandle(value: "nudgy", type: .unknown)
+        let nudgy = INPerson(
+            personHandle: handle,
+            nameComponents: nil,
+            displayName: "Nudgy 🐧",
+            image: nil,
+            contactIdentifier: nil,
+            customIdentifier: "nudgy-penguin"
+        )
+        
+        let intent = INSendMessageIntent(
+            recipients: nil,
+            outgoingMessageType: .outgoingMessageText,
+            content: content.body,
+            speakableGroupName: nil,
+            conversationIdentifier: "nudgy-conversation",
+            serviceName: nil,
+            sender: nudgy,
+            attachments: nil
+        )
+        
+        let interaction = INInteraction(intent: intent, response: nil)
+        interaction.direction = .incoming
+        // Donate the interaction (fire-and-forget)
+        interaction.donate()
+        
+        // Update the content with the communication intent
+        if let updated = try? content.updating(from: intent) as? UNMutableNotificationContent {
+            return updated
+        }
+        return content
+    }
+    
     // MARK: - Schedule Snoozed Item Notification
     
-    func scheduleSnoozedNotification(for item: NudgeItem) {
+    func scheduleSnoozedNotification(for item: NudgeItem, settings: AppSettings? = nil) {
         guard let snoozedUntil = item.snoozedUntil else { return }
         
+        // Per-category notification gating
+        if let settings {
+            guard settings.isCategoryNotificationEnabled(item.resolvedCategory) else { return }
+        }
+        
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Time to nudge")
+        
+        // Category-aware notification title
+        let cat = item.resolvedCategory
+        switch cat {
+        case .call:        content.title = String(localized: "Time to make that call")
+        case .text:        content.title = String(localized: "Quick text waiting")
+        case .email:       content.title = String(localized: "Email reminder")
+        case .cooking:     content.title = String(localized: "Cooking time!")
+        case .cleaning:    content.title = String(localized: "Quick tidy reminder")
+        case .exercise:    content.title = String(localized: "Time to move")
+        case .health:      content.title = String(localized: "Health reminder")
+        case .finance:     content.title = String(localized: "Finance check-in")
+        case .work:        content.title = String(localized: "Work nudge")
+        case .homework:    content.title = String(localized: "Study time")
+        case .shopping:    content.title = String(localized: "Shopping reminder")
+        case .errand:      content.title = String(localized: "Errand time")
+        case .selfCare:    content.title = String(localized: "Self-care moment")
+        case .social:      content.title = String(localized: "Social reminder")
+        case .creative:    content.title = String(localized: "Creative time")
+        case .appointment: content.title = String(localized: "Appointment reminder")
+        case .maintenance: content.title = String(localized: "Fix & build time")
+        case .alarm:       content.title = String(localized: "Alarm reminder")
+        case .link:        content.title = String(localized: "Link to check")
+        case .general:     content.title = String(localized: "Time to nudge")
+        }
         content.body = item.content
         content.userInfo = ["itemID": item.id.uuidString]
         
@@ -185,6 +278,11 @@ final class NotificationService: NSObject {
             content.categoryIdentifier = Category.snoozedItem.rawValue
         }
         
+        content.interruptionLevel = .timeSensitive
+        
+        // Wrap as communication-style notification from Nudgy
+        let finalContent = wrapAsCommunication(content)
+        
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute],
             from: snoozedUntil
@@ -193,7 +291,7 @@ final class NotificationService: NSObject {
         
         let request = UNNotificationRequest(
             identifier: "snooze-\(item.id.uuidString)",
-            content: content,
+            content: finalContent,
             trigger: trigger
         )
         
@@ -203,6 +301,9 @@ final class NotificationService: NSObject {
     // MARK: - Schedule Stale Item Notification
     
     func scheduleStaleNotification(for item: NudgeItem, settings: AppSettings) {
+        // Per-category notification gating
+        guard settings.isCategoryNotificationEnabled(item.resolvedCategory) else { return }
+        
         // Check if delivery time (30 min from now) would be during quiet hours
         let deliveryTime = Date().addingTimeInterval(1800)
         guard !settings.isDateInQuietHours(deliveryTime) else { return }
@@ -223,7 +324,15 @@ final class NotificationService: NSObject {
         content.title = String(localized: "Gentle nudge")
         
         let template = staleTemplates.randomElement() ?? staleTemplates[0]
-        content.body = String(format: template, item.content, item.ageInDays)
+        let baseBody = String(format: template, item.content, item.ageInDays)
+        
+        // Prefix with category emoji for context
+        let cat = item.resolvedCategory
+        if cat != .general {
+            content.body = "\(cat.label): \(baseBody)"
+        } else {
+            content.body = baseBody
+        }
         content.categoryIdentifier = Category.staleItem.rawValue
         content.userInfo = ["itemID": item.id.uuidString]
         
@@ -234,12 +343,17 @@ final class NotificationService: NSObject {
             content.sound = .default
         }
         
+        content.interruptionLevel = .timeSensitive
+        
+        // Wrap as communication-style notification from Nudgy
+        let finalContent = wrapAsCommunication(content)
+        
         // Schedule for 30 minutes from now
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1800, repeats: false)
         
         let request = UNNotificationRequest(
             identifier: "stale-\(item.id.uuidString)",
-            content: content,
+            content: finalContent,
             trigger: trigger
         )
         
@@ -251,7 +365,7 @@ final class NotificationService: NSObject {
     
     // MARK: - Schedule End-of-Day Prompt
     
-    func scheduleEndOfDayPrompt(remainingCount: Int, settings: AppSettings) {
+    func scheduleEndOfDayPrompt(remainingCount: Int, settings: AppSettings, remainingItems: [NudgeItem] = []) {
         guard remainingCount > 0 else { return }
         
         // Build 4pm today
@@ -269,21 +383,79 @@ final class NotificationService: NSObject {
         guard !settings.isDateInQuietHours(targetDate) else { return }
         
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Almost there")
-        content.body = endOfDayTemplates.randomElement() ?? endOfDayTemplates[0]
+        
+        // Category-aware title and body
+        if !remainingItems.isEmpty {
+            let catCounts = Dictionary(grouping: remainingItems, by: { $0.resolvedCategory })
+                .mapValues(\.count)
+                .sorted { $0.value > $1.value }
+            content.title = String(localized: "\(remainingCount) nudges left")
+            let catSummary = catCounts.prefix(3)
+                .map { "\($0.value) \($0.key.label.lowercased())" }
+                .joined(separator: ", ")
+            content.body = String(localized: "\(catSummary) — any quick wins before bed?")
+        } else {
+            content.title = String(localized: "Almost there")
+            content.body = endOfDayTemplates.randomElement() ?? endOfDayTemplates[0]
+        }
         content.categoryIdentifier = Category.endOfDay.rawValue
         content.sound = .default
+        
+        // Wrap as communication-style notification from Nudgy
+        let finalContent = wrapAsCommunication(content)
         
         let triggerComponents = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: targetDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: triggerComponents, repeats: false)
         
         let request = UNNotificationRequest(
             identifier: "eod-\(Date().formatted(.iso8601.year().month().day()))",
+            content: finalContent,
+            trigger: trigger
+        )
+        
+        UNUserNotificationCenter.current().add(request)
+    }
+    
+    // MARK: - Schedule Alarm Notification
+    
+    /// Schedule a loud alarm-style notification for a NudgeItem at the given date.
+    /// Uses the longest-duration system sound to mimic an alarm.
+    func scheduleAlarm(for item: NudgeItem, at date: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "⏰ Alarm — Nudge")
+        content.body = item.content
+        content.userInfo = ["itemID": item.id.uuidString, "isAlarm": true]
+        content.categoryIdentifier = "ALARM"
+        content.interruptionLevel = .timeSensitive
+        
+        // Use custom alarm sound if available, otherwise use the loudest default
+        if let _ = Bundle.main.url(forResource: "nudge-alarm", withExtension: "caf") {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("nudge-alarm.caf"))
+        } else {
+            content.sound = UNNotificationSound.defaultCritical
+        }
+        
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: date
+        )
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        
+        let request = UNNotificationRequest(
+            identifier: "alarm-\(item.id.uuidString)",
             content: content,
             trigger: trigger
         )
         
         UNUserNotificationCenter.current().add(request)
+        Log.notify.debug("Alarm scheduled for \(item.content) at \(date)")
+    }
+    
+    /// Cancel a scheduled alarm for an item.
+    func cancelAlarm(for itemID: UUID) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: ["alarm-\(itemID.uuidString)"]
+        )
     }
     
     // MARK: - Cancel
@@ -292,6 +464,7 @@ final class NotificationService: NSObject {
         let identifiers = [
             "snooze-\(itemID.uuidString)",
             "stale-\(itemID.uuidString)",
+            "alarm-\(itemID.uuidString)",
         ]
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
     }
@@ -332,6 +505,23 @@ extension NotificationService: UNUserNotificationCenterDelegate {
             action = "snoozeTomorrow"
         case Action.markDone.rawValue:
             action = "markDone"
+        case "SNOOZE_5MIN":
+            // Re-schedule the alarm 5 minutes from now
+            if let itemID = itemIDString,
+               let content = response.notification.request.content.mutableCopy() as? UNMutableNotificationContent {
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 300, repeats: false)
+                let request = UNNotificationRequest(
+                    identifier: "alarm-\(itemID)",
+                    content: content,
+                    trigger: trigger
+                )
+                do {
+                    try await UNUserNotificationCenter.current().add(request)
+                } catch {
+                    Log.notify.error("Failed to re-schedule snoozed alarm: \(error, privacy: .public)")
+                }
+            }
+            return
         case Action.viewItem.rawValue, UNNotificationDefaultActionIdentifier:
             action = "view"
         default:

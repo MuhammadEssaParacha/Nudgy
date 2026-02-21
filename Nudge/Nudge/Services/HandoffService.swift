@@ -78,7 +78,7 @@ enum HandoffService {
     @MainActor
     static func brainDumpUserActivity() -> NSUserActivity {
         let activity = NSUserActivity(activityType: brainDumpActivity)
-        activity.title = String(localized: "Brain Dump")
+        activity.title = String(localized: "Unload")
         activity.isEligibleForHandoff = true
         activity.isEligibleForSearch = false
         activity.isEligibleForPrediction = true

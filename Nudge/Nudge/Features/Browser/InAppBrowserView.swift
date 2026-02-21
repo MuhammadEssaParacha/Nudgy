@@ -25,9 +25,11 @@ struct InAppBrowserView: UIViewControllerRepresentable {
         config.barCollapsingEnabled = true
         
         let safari = SFSafariViewController(url: url, configuration: config)
-        safari.preferredControlTintColor = tintColor
-        safari.preferredBarTintColor = UIColor.black
         safari.dismissButtonStyle = .done
+        if #unavailable(iOS 26) {
+            safari.preferredControlTintColor = tintColor
+            safari.preferredBarTintColor = UIColor.black
+        }
         safari.delegate = context.coordinator
         return safari
     }

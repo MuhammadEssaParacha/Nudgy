@@ -134,75 +134,118 @@ struct FishView: View {
     }
 }
 
-// MARK: - Animated Fish Shape (Tail Wag)
+// MARK: - Animated Fish Shape (Tail Wag, Stage-Aware)
 
 /// Fish body with animatable tail wag via `tailPhase`.
-/// The tail fork bends left/right based on `tailPhase` (expected range -1...1).
+/// Body proportions shift with evolution `stage`:
+///   baby     → round, compact, stubby forked tail
+///   juvenile → baseline streamlined body (original silhouette)
+///   adult    → elongated snout, deeper fork spread
+///   elder    → wide sweeping fan tail, deeper body
+///   ancient  → dramatic full-width fan tail with swept-back arms
 struct AnimatedFishShape: Shape {
-    var tailPhase: CGFloat  // -1…1 range, 0 = centered
+    var tailPhase: CGFloat          // -1…1 range, 0 = centred
+    var stage: FishEvolutionStage = .juvenile
 
     var animatableData: CGFloat {
         get { tailPhase }
         set { tailPhase = newValue }
     }
 
+    // Per-stage normalised geometry (all values 0…1 within the bounding rect)
+    private struct StageGeom {
+        let mouthX:   CGFloat   // rightmost point (mouth tip)
+        let dorsalX:  CGFloat   // dorsal-ridge peak X (controls top-back bulge)
+        let backX:    CGFloat   // body ↔ tail junction X
+        let tailTipX: CGFloat   // leftmost tail-tip extent
+        let tailTopY: CGFloat   // top fork-tip Y fraction (above centre)
+        let tailBotY: CGFloat   // bottom fork-tip Y fraction (below centre)
+        let notchX:   CGFloat   // tail-centre concave notch X
+        let wagAmp:   CGFloat   // tail deflection amplitude (mul of height)
+    }
+
+    private var geom: StageGeom {
+        switch stage {
+        case .baby:
+            return StageGeom(mouthX: 0.70, dorsalX: 0.52, backX: 0.32,
+                             tailTipX: 0.10, tailTopY: 0.18, tailBotY: 0.82,
+                             notchX: 0.19, wagAmp: 0.05)
+        case .juvenile:
+            return StageGeom(mouthX: 0.72, dorsalX: 0.55, backX: 0.32,
+                             tailTipX: 0.08, tailTopY: 0.12, tailBotY: 0.88,
+                             notchX: 0.18, wagAmp: 0.06)
+        case .adult:
+            return StageGeom(mouthX: 0.75, dorsalX: 0.57, backX: 0.30,
+                             tailTipX: 0.04, tailTopY: 0.07, tailBotY: 0.93,
+                             notchX: 0.16, wagAmp: 0.07)
+        case .elder:
+            return StageGeom(mouthX: 0.78, dorsalX: 0.59, backX: 0.27,
+                             tailTipX: 0.01, tailTopY: 0.03, tailBotY: 0.97,
+                             notchX: 0.15, wagAmp: 0.09)
+        case .ancient:
+            return StageGeom(mouthX: 0.80, dorsalX: 0.61, backX: 0.22,
+                             tailTipX: -0.02, tailTopY: 0.00, tailBotY: 1.00,
+                             notchX: 0.16, wagAmp: 0.12)
+        }
+    }
+
     func path(in rect: CGRect) -> Path {
         let w = rect.width
         let h = rect.height
-        // Tail deflection — how far tail control points shift vertically
-        let tailDeflect = h * 0.06 * tailPhase
+        let g = geom
+        let d = h * g.wagAmp * tailPhase   // vertical tail deflection
 
         return Path { p in
-            // Body — egg/oval, slightly pointed at mouth
-            p.move(to: CGPoint(x: w * 0.72, y: h * 0.5))
+            // ── Mouth (rightmost, vertical centre) ────────────────────
+            p.move(to: CGPoint(x: w * g.mouthX, y: h * 0.50))
 
-            // Top curve of body (mouth → dorsal → back)
+            // ── Top body: mouth → dorsal ridge peak → body/tail junction
             p.addCurve(
-                to: CGPoint(x: w * 0.32, y: h * 0.18),
-                control1: CGPoint(x: w * 0.72, y: h * 0.25),
-                control2: CGPoint(x: w * 0.55, y: h * 0.15)
+                to: CGPoint(x: w * g.backX, y: h * 0.18),
+                control1: CGPoint(x: w * g.mouthX,          y: h * 0.24),
+                control2: CGPoint(x: w * (g.dorsalX + 0.05), y: h * 0.14)
             )
 
-            // Connect to tail (top) — wag shifts this control point
+            // ── Top tail arm: junction → top fork tip (wag deflects here)
             p.addCurve(
-                to: CGPoint(x: w * 0.08, y: h * 0.12 + tailDeflect),
-                control1: CGPoint(x: w * 0.20, y: h * 0.20),
-                control2: CGPoint(x: w * 0.12, y: h * 0.15 + tailDeflect * 0.5)
+                to: CGPoint(x: w * g.tailTipX, y: h * g.tailTopY + d),
+                control1: CGPoint(x: w * (g.backX - 0.05),    y: h * 0.18),
+                control2: CGPoint(x: w * (g.tailTipX + 0.07), y: h * g.tailTopY + d * 0.5)
             )
 
-            // Tail fork top
+            // ── Top fork → centre notch ────────────────────────────────
             p.addCurve(
-                to: CGPoint(x: w * 0.18, y: h * 0.42),
-                control1: CGPoint(x: w * 0.02, y: h * 0.22 + tailDeflect),
-                control2: CGPoint(x: w * 0.10, y: h * 0.38)
+                to: CGPoint(x: w * g.notchX, y: h * 0.42),
+                control1: CGPoint(x: w * (g.tailTipX + 0.02), y: h * (g.tailTopY + 0.09) + d),
+                control2: CGPoint(x: w * (g.notchX - 0.02),   y: h * 0.38)
             )
 
-            // Tail center notch
+            // ── Notch (tight concave indent) ──────────────────────────
             p.addCurve(
-                to: CGPoint(x: w * 0.18, y: h * 0.58),
-                control1: CGPoint(x: w * 0.15, y: h * 0.48),
-                control2: CGPoint(x: w * 0.15, y: h * 0.52)
+                to: CGPoint(x: w * g.notchX, y: h * 0.58),
+                control1: CGPoint(x: w * (g.notchX - 0.03), y: h * 0.47),
+                control2: CGPoint(x: w * (g.notchX - 0.03), y: h * 0.53)
             )
 
-            // Tail fork bottom
+            // ── Centre notch → bottom fork tip ────────────────────────
             p.addCurve(
-                to: CGPoint(x: w * 0.08, y: h * 0.88 + tailDeflect),
-                control1: CGPoint(x: w * 0.10, y: h * 0.62),
-                control2: CGPoint(x: w * 0.02, y: h * 0.78 + tailDeflect)
+                to: CGPoint(x: w * g.tailTipX, y: h * g.tailBotY + d),
+                control1: CGPoint(x: w * (g.notchX - 0.02),   y: h * 0.62),
+                control2: CGPoint(x: w * (g.tailTipX + 0.02), y: h * (g.tailBotY - 0.09) + d)
             )
 
-            // Connect from tail → bottom of body
+            // ── Bottom tail arm: fork tip → body/tail junction ────────
             p.addCurve(
-                to: CGPoint(x: w * 0.32, y: h * 0.82),
-                control1: CGPoint(x: w * 0.12, y: h * 0.85 + tailDeflect * 0.5),
-                control2: CGPoint(x: w * 0.20, y: h * 0.80)
+                to: CGPoint(x: w * g.backX, y: h * 0.82),
+                control1: CGPoint(x: w * (g.tailTipX + 0.07), y: h * g.tailBotY + d * 0.5),
+                control2: CGPoint(x: w * (g.backX - 0.05),    y: h * 0.82)
             )
 
-            // Bottom curve of body (back → belly → mouth)
+            // ── Bottom body: junction → belly → mouth ─────────────────
             p.addCurve(
-                to: CGPoint(x: w * 0.72, y: h * 0.5),
-                control1: CGPoint(x: w * 0.55, y: h * 0.85),
-                control2: CGPoint(x: w * 0.72, y: h * 0.75)
+                to: CGPoint(x: w * g.mouthX, y: h * 0.50),
+                control1: CGPoint(x: w * (g.dorsalX + 0.05), y: h * 0.86),
+                control2: CGPoint(x: w * g.mouthX,           y: h * 0.76)
             )
 
             p.closeSubpath()
@@ -212,17 +255,48 @@ struct AnimatedFishShape: Shape {
 
 /// Fish view with animated tail wag driven by a phase value.
 /// Use inside aquarium/tank for lively swimming animation.
+///
+/// `stage` controls body silhouette AND visual complexity:
+///  - baby     → proportionally large eye, simple fins, stubby body
+///  - juvenile → baseline streamlined body (original look)
+///  - adult    → second dorsal fin + second pectoral fin, taller primary dorsal
+///  - elder    → wide fan tail, scale-mark arcs on body, broader proportions
+///  - ancient  → dramatic fan tail with glowing filament rays, crown dorsal
 struct AnimatedFishView: View {
     var size: CGFloat = 32
     var color: Color = Color(hex: "4FC3F7")
     var accentColor: Color = Color(hex: "0288D1")
     /// Tail wag phase — expected range -1…1, oscillates via sin wave.
     var tailPhase: CGFloat = 0
+    /// Evolution stage — drives body silhouette and layered fin detail.
+    var stage: FishEvolutionStage = .juvenile
+
+    // Eye diameter: baby has a proportionally larger "cute" eye
+    private var eyeSize: CGFloat {
+        switch stage {
+        case .baby:    return size * 0.17
+        case .juvenile: return size * 0.13
+        case .adult:   return size * 0.12
+        case .elder:   return size * 0.12
+        case .ancient: return size * 0.11
+        }
+    }
+
+    // Eye X offset tracks the mouth position per stage
+    private var eyeOffsetX: CGFloat {
+        switch stage {
+        case .baby:    return size * 0.10
+        case .juvenile: return size * 0.17
+        case .adult:   return size * 0.19
+        case .elder:   return size * 0.21
+        case .ancient: return size * 0.23
+        }
+    }
 
     var body: some View {
         ZStack {
-            // Body fill with animated tail
-            AnimatedFishShape(tailPhase: tailPhase)
+            // ── Body fill — stage-parametrised silhouette ──────────────
+            AnimatedFishShape(tailPhase: tailPhase, stage: stage)
                 .fill(
                     LinearGradient(
                         colors: [color, accentColor],
@@ -231,8 +305,8 @@ struct AnimatedFishView: View {
                     )
                 )
 
-            // Sheen highlight
-            AnimatedFishShape(tailPhase: tailPhase)
+            // ── Sheen highlight ────────────────────────────────────────
+            AnimatedFishShape(tailPhase: tailPhase, stage: stage)
                 .fill(
                     RadialGradient(
                         colors: [Color.white.opacity(0.25), Color.clear],
@@ -242,37 +316,101 @@ struct AnimatedFishView: View {
                     )
                 )
 
-            // Dorsal fin with subtle wag
+            // ── Elder / Ancient: scale-mark arcs on body ──────────────
+            if stage >= .elder {
+                let scaleOpacity: CGFloat = stage == .ancient ? 0.25 : 0.18
+                ForEach(0..<3, id: \.self) { i in
+                    let yFrac = CGFloat(i) * 0.14 + 0.30   // 0.30, 0.44, 0.58
+                    Path { path in
+                        path.addArc(
+                            center: CGPoint(x: size * 0.32, y: size * 0.65 * yFrac),
+                            radius: size * 0.10,
+                            startAngle: .degrees(-50),
+                            endAngle: .degrees(50),
+                            clockwise: false
+                        )
+                    }
+                    .stroke(accentColor.opacity(scaleOpacity), lineWidth: max(0.5, size * 0.018))
+                }
+            }
+
+            // ── Ancient: glowing tail-ray filaments ───────────────────
+            if stage == .ancient {
+                // Top filament — sweeps from body/tail junction to top fork tip
+                Path { p in
+                    p.move(to: CGPoint(x: size * 0.22,  y: size * 0.65 * 0.38))
+                    p.addCurve(
+                        to: CGPoint(x: size * 0.00,  y: size * 0.65 * 0.02),
+                        control1: CGPoint(x: size * 0.14, y: size * 0.65 * 0.22),
+                        control2: CGPoint(x: size * 0.06, y: size * 0.65 * 0.10)
+                    )
+                }
+                .stroke(color.opacity(0.50), lineWidth: max(0.8, size * 0.022))
+
+                // Bottom filament
+                Path { p in
+                    p.move(to: CGPoint(x: size * 0.22,  y: size * 0.65 * 0.62))
+                    p.addCurve(
+                        to: CGPoint(x: size * 0.00,  y: size * 0.65 * 0.98),
+                        control1: CGPoint(x: size * 0.14, y: size * 0.65 * 0.78),
+                        control2: CGPoint(x: size * 0.06, y: size * 0.65 * 0.90)
+                    )
+                }
+                .stroke(color.opacity(0.50), lineWidth: max(0.8, size * 0.022))
+            }
+
+            // ── Primary dorsal fin (taller from adult+) ────────────────
             DorsalFinShape()
                 .fill(accentColor.opacity(0.7))
-                .frame(width: size * 0.25, height: size * 0.2)
+                .frame(
+                    width: size * (stage >= .adult ? 0.28 : 0.25),
+                    height: size * (stage >= .adult ? 0.22 : 0.20)
+                )
                 .rotationEffect(.degrees(Double(tailPhase) * -3))
-                .offset(x: size * 0.02, y: -size * 0.25)
+                .offset(x: size * 0.02, y: -size * (stage >= .adult ? 0.27 : 0.25))
 
-            // Pectoral fin (bottom)
+            // ── Secondary dorsal fin (adult+) ──────────────────────────
+            if stage >= .adult {
+                DorsalFinShape()
+                    .fill(accentColor.opacity(0.35))
+                    .frame(width: size * 0.15, height: size * 0.12)
+                    .rotationEffect(.degrees(Double(tailPhase) * -2))
+                    .offset(x: -size * 0.06, y: -size * 0.20)
+            }
+
+            // ── Primary pectoral fin ───────────────────────────────────
             PectoralFinShape()
                 .fill(accentColor.opacity(0.4))
                 .frame(width: size * 0.15, height: size * 0.12)
                 .rotationEffect(.degrees(Double(tailPhase) * 8))
                 .offset(x: size * 0.06, y: size * 0.12)
 
-            // Eye
+            // ── Second pectoral fin (adult+) ───────────────────────────
+            if stage >= .adult {
+                PectoralFinShape()
+                    .fill(accentColor.opacity(0.20))
+                    .frame(width: size * 0.10, height: size * 0.08)
+                    .rotationEffect(.degrees(Double(tailPhase) * -5))
+                    .offset(x: -size * 0.02, y: size * 0.17)
+            }
+
+            // ── Eye ───────────────────────────────────────────────────
             Circle()
                 .fill(Color(hex: "0A0A0E"))
-                .frame(width: size * 0.13, height: size * 0.13)
-                .offset(x: size * 0.17, y: -size * 0.04)
+                .frame(width: eyeSize, height: eyeSize)
+                .offset(x: eyeOffsetX, y: -size * 0.04)
 
             // Eye glint
             Circle()
                 .fill(Color.white.opacity(0.9))
-                .frame(width: size * 0.05, height: size * 0.05)
-                .offset(x: size * 0.19, y: -size * 0.06)
+                .frame(width: eyeSize * 0.40, height: eyeSize * 0.40)
+                .offset(x: eyeOffsetX + size * 0.02, y: -size * 0.06)
 
-            // Gill mark
+            // ── Gill mark ─────────────────────────────────────────────
             GillMarkShape()
                 .stroke(accentColor.opacity(0.5), lineWidth: max(1, size * 0.03))
                 .frame(width: size * 0.08, height: size * 0.15)
-                .offset(x: size * 0.08, y: size * 0.02)
+                .offset(x: eyeOffsetX - size * 0.09, y: size * 0.02)
         }
         .frame(width: size, height: size * 0.65)
     }
@@ -760,7 +898,8 @@ struct ShootingStar: View {
     
     private func scheduleShootingStar() {
         let initialDelay = Double.random(in: 2...6)
-        DispatchQueue.main.asyncAfter(deadline: .now() + initialDelay) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(initialDelay))
             fireShootingStar()
         }
     }
@@ -779,16 +918,15 @@ struct ShootingStar: View {
             progress = 1.0
         }
         
-        // Fade out
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Fade out, then schedule next one
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.5))
             withAnimation(.easeOut(duration: 0.2)) {
                 opacity = 0
             }
-        }
-        
-        // Schedule next one
-        let nextDelay = Double.random(in: 5...12)
-        DispatchQueue.main.asyncAfter(deadline: .now() + nextDelay) {
+            
+            let nextDelay = Double.random(in: 5...12)
+            try? await Task.sleep(for: .seconds(nextDelay))
             fireShootingStar()
         }
     }
@@ -839,7 +977,7 @@ struct SnowfallView: View {
     private func spawnFlake() {
         let flake = SnowParticle(
             id: UUID(),
-            x: CGFloat.random(in: 0...UIScreen.main.bounds.width),
+            x: CGFloat.random(in: 0...UIScreen.current.bounds.width),
             y: -10,
             size: CGFloat.random(in: 2...5),
             opacity: Double.random(in: 0.15...0.4),
@@ -851,13 +989,14 @@ struct SnowfallView: View {
         
         withAnimation(.linear(duration: flake.speed)) {
             if let idx = particles.firstIndex(where: { $0.id == flake.id }) {
-                particles[idx].y = UIScreen.main.bounds.height + 20
+                particles[idx].y = UIScreen.current.bounds.height + 20
                 particles[idx].x += drift
             }
         }
         
         // Clean up after animation
-        DispatchQueue.main.asyncAfter(deadline: .now() + flake.speed + 0.5) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(flake.speed + 0.5))
             particles.removeAll { $0.id == flake.id }
         }
     }

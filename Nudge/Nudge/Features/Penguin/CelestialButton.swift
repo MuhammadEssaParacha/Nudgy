@@ -352,9 +352,10 @@ private struct AnimatedCounter: View {
                     return
                 }
                 let interval = max(0.016, duration / Double(steps))
-                for i in 1...steps {
-                    let value = Int(Double(target) * Double(i) / Double(steps))
-                    DispatchQueue.main.asyncAfter(deadline: .now() + interval * Double(i)) {
+                Task { @MainActor in
+                    for i in 1...steps {
+                        let value = Int(Double(target) * Double(i) / Double(steps))
+                        try? await Task.sleep(for: .seconds(interval))
                         withAnimation(.easeOut(duration: 0.08)) {
                             displayed = value
                         }
@@ -545,7 +546,8 @@ struct CelestialExpandedOverlay: View {
         withAnimation(.easeOut(duration: 0.2).delay(0.1)) {
             appeared = false
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.3))
             isExpanded = false
         }
     }

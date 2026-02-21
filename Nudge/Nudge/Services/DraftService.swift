@@ -9,6 +9,7 @@
 
 import Foundation
 import SwiftData
+import os
 
 /// Manages AI-generated message drafts for actionable tasks.
 /// Runs draft generation in the background when items become the active "One-Thing."
@@ -63,12 +64,15 @@ final class DraftService {
         
         do {
             // Try NudgyEngine first (OpenAI-powered), fall back to on-device AIService
+            let categoryHint = item.resolvedCategory != .general ? item.resolvedCategory.label : nil
+            
             if NudgyEngine.shared.isAvailable {
                 if let result = await NudgyEngine.shared.generateDraft(
                     taskContent: item.content,
                     actionType: actionType.rawValue,
                     contactName: item.contactName,
-                    senderName: senderName
+                    senderName: senderName,
+                    categoryLabel: categoryHint
                 ) {
                     if !result.draft.isEmpty {
                         repository.updateDraft(item, draft: result.draft, subject: result.subject.isEmpty ? nil : result.subject)
@@ -89,9 +93,7 @@ final class DraftService {
         } catch {
             // Silently fail — user can still compose manually
             lastError = error.localizedDescription
-            #if DEBUG
-            print("⚠️ Draft generation failed: \(error)")
-            #endif
+            Log.services.warning("Draft generation failed: \(error, privacy: .public)")
         }
         
         isGenerating = false

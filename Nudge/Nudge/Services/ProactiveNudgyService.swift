@@ -200,6 +200,8 @@ enum ProactiveNudgyService {
                 return "'\(item.content)' — want me to open this up for you? Been \(days) days 🔗"
             case .addToCalendar:
                 return "'\(item.content)' — should we schedule this? Been \(days) days 📅"
+            case .setAlarm:
+                return "'\(item.content)' — want me to set that alarm? Been \(days) days ⏰"
             }
         }
         
@@ -209,8 +211,6 @@ enum ProactiveNudgyService {
             return "'\(item.content)' is \(days) days old. Want to tackle it now, break it down, or snooze it? 🐧"
         }
     }
-    
-    // MARK: - Evening Review Content
     
     /// Generate evening review data.
     static func generateEveningReview(modelContext: ModelContext) -> (completed: Int, remaining: Int, streak: Int, moodNote: String) {

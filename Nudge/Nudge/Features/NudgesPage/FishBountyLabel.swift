@@ -2,7 +2,7 @@
 //  FishBountyLabel.swift
 //  Nudge
 //
-//  Shows the fish species + snowflake reward a task will earn.
+//  Shows the fish species + fish reward a task will earn.
 //  Displays bounty BEFORE completion to motivate action.
 //
 //  Usage:
@@ -22,7 +22,7 @@ struct FishBountyLabel: View {
     }
     
     private var baseValue: Int {
-        species.snowflakeValue
+        species.fishValue
     }
     
     private var hasMultiplier: Bool {
@@ -30,7 +30,7 @@ struct FishBountyLabel: View {
     }
     
     private var totalValue: Int {
-        FishEconomy.snowflakesForCatch(species: species, streak: streak, isAllClear: false)
+        FishEconomy.fishForCatch(species: species, streak: streak, isAllClear: false)
     }
     
     var body: some View {
@@ -50,13 +50,15 @@ struct FishBountyLabel: View {
                 .font(AppTheme.caption)
                 .foregroundStyle(DesignTokens.textTertiary)
             
-            // Snowflake value
+            // Fish value
             HStack(spacing: 2) {
                 Text("\(totalValue)")
                     .font(compact ? AppTheme.captionBold : .system(size: 12, weight: .semibold))
                     .foregroundStyle(DesignTokens.goldCurrency)
                 
-                SnowflakeIcon(size: compact ? 10 : 12)
+                Image(systemName: "fish.fill")
+                    .font(.system(size: compact ? 10 : 12))
+                    .foregroundStyle(DesignTokens.goldCurrency)
             }
             
             // Streak multiplier badge
@@ -92,10 +94,10 @@ struct FishBountyLabel: View {
                 )
         }
         .nudgeAccessibility(
-            label: String(localized: "\(species.label) catch worth \(totalValue) snowflakes"),
+            label: String(localized: "\(species.label) catch worth \(totalValue) fish"),
             hint: hasMultiplier
                 ? String(localized: "Streak multiplier active")
-                : String(localized: "Complete this task to earn snowflakes"),
+                : String(localized: "Complete this task to earn fish"),
             traits: .isStaticText
         )
     }

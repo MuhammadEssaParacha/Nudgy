@@ -12,6 +12,7 @@
 
 import SwiftUI
 import SafariServices
+import os
 
 // MARK: - Popup Container (manages card stack + navigation)
 
@@ -217,12 +218,13 @@ struct NudgeDetailPopup: View {
         isAnimatingTransition = true
 
         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-            dragOffset = CGSize(width: -UIScreen.main.bounds.width, height: 0)
+            dragOffset = CGSize(width: -UIScreen.current.bounds.width, height: 0)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.2))
             selectedIndex += 1
-            dragOffset = CGSize(width: UIScreen.main.bounds.width * 0.3, height: 0)
+            dragOffset = CGSize(width: UIScreen.current.bounds.width * 0.3, height: 0)
             withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                 dragOffset = .zero
                 dismissProgress = 0
@@ -237,12 +239,13 @@ struct NudgeDetailPopup: View {
         isAnimatingTransition = true
 
         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-            dragOffset = CGSize(width: UIScreen.main.bounds.width, height: 0)
+            dragOffset = CGSize(width: UIScreen.current.bounds.width, height: 0)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.2))
             selectedIndex -= 1
-            dragOffset = CGSize(width: -UIScreen.main.bounds.width * 0.3, height: 0)
+            dragOffset = CGSize(width: -UIScreen.current.bounds.width * 0.3, height: 0)
             withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                 dragOffset = .zero
                 dismissProgress = 0
@@ -260,7 +263,8 @@ struct NudgeDetailPopup: View {
             appeared = false
             dragOffset = CGSize(width: 0, height: 300)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.25))
             isPresented = false
         }
     }
@@ -303,12 +307,16 @@ struct NudgeDetailCard: View {
     @State private var isEditing = false
     @State private var editedContent: String = ""
     @State private var showSnoozeOptions = false
+    @State private var showAlarmPicker = false
+    @State private var alarmDate: Date = Date().addingTimeInterval(3600)
+    @State private var alarmSet = false
     @State private var showMicroSteps = false
     @State private var microSteps: [MicroStep] = []
     @State private var isLoadingSteps = false
     @State private var showInAppBrowser = false
     @State private var browserURL: URL?
     @State private var showDraftFull = false
+    @State private var showCategoryPicker = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -346,6 +354,12 @@ struct NudgeDetailCard: View {
                     snoozeGrid
                 }
 
+                // ─── Alarm picker (opt-in) ───
+                if showAlarmPicker {
+                    thinDivider
+                    alarmPickerSection
+                }
+
                 thinDivider
 
                 // ─── Toolbar ───
@@ -353,7 +367,7 @@ struct NudgeDetailCard: View {
             }
             .padding(DesignTokens.spacingLG)
         }
-        .frame(maxHeight: UIScreen.main.bounds.height * 0.72)
+        .frame(maxHeight: UIScreen.current.bounds.height * 0.72)
         .background { cardBackground }
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard + 4))
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusCard + 4))
@@ -479,6 +493,49 @@ struct NudgeDetailCard: View {
 
     private var compactMeta: some View {
         HStack(spacing: DesignTokens.spacingSM) {
+            // Tappable category chip — opens picker for manual override
+            if item.actionType == nil {
+                Button {
+                    HapticService.shared.actionButtonTap()
+                    showCategoryPicker = true
+                } label: {
+                    HStack(spacing: 4) {
+                        CategoryChip(category: item.resolvedCategory, small: false)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(DesignTokens.textTertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showCategoryPicker) {
+                    NavigationStack {
+                        TaskCategoryPicker(selectedCategory: Binding(
+                            get: { item.category },
+                            set: { newCat in
+                                if let cat = newCat {
+                                    item.category = cat
+                                } else {
+                                    item.categoryRaw = nil
+                                }
+                                item.updatedAt = Date()
+                                onContentChanged?()
+                            }
+                        ))
+                        .navigationTitle(String(localized: "Category"))
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button(String(localized: "Done")) {
+                                    showCategoryPicker = false
+                                }
+                            }
+                        }
+                    }
+                    .presentationDetents([.medium])
+                    .preferredColorScheme(.dark)
+                }
+            }
+            
             if let priority = item.priority {
                 metadataChip(
                     icon: priority == .high ? "flame.fill" : priority == .medium ? "equal" : "arrow.down",
@@ -527,13 +584,46 @@ struct NudgeDetailCard: View {
         } else if item.hasAction {
             actionCard
         } else {
-            let urls = URLActionGenerator.generateActions(
-                for: item.content,
-                actionType: item.actionType,
-                actionTarget: item.actionTarget
-            )
-            if !urls.isEmpty {
-                urlActionsCard(urls)
+            // Category-aware: show category tools for recognized categories
+            let cat = item.resolvedCategory
+            if cat != .general {
+                CategoryCardView(
+                    item: item,
+                    category: cat,
+                    onFocus: onFocus,
+                    onAction: onAction,
+                    onTimerStart: { minutes in
+                        item.estimatedMinutes = minutes
+                        onFocus?()
+                    },
+                    onOpenMaps: {
+                        let query = item.actionTarget ?? item.content
+                        if let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                           let url = URL(string: "maps://?q=\(encoded)") {
+                            UIApplication.shared.open(url)
+                        }
+                    },
+                    onAddCalendar: {
+                        HapticService.shared.actionButtonTap()
+                        Task {
+                            if let _ = await CalendarService.shared.createEvent(from: item) {
+                                HapticService.shared.swipeDone()
+                            } else {
+                                HapticService.shared.error()
+                                Log.ui.error("Failed to create calendar event")
+                            }
+                        }
+                    }
+                )
+            } else {
+                let urls = URLActionGenerator.generateActions(
+                    for: item.content,
+                    actionType: item.actionType,
+                    actionTarget: item.actionTarget
+                )
+                if !urls.isEmpty {
+                    urlActionsCard(urls)
+                }
             }
         }
     }
@@ -848,6 +938,126 @@ struct NudgeDetailCard: View {
         .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 
+    // MARK: - Alarm Picker
+    
+    private var alarmPickerSection: some View {
+        let tint = Color(hex: "FF9F0A")
+        let cal = Calendar.current
+        let now = Date()
+        let presets: [(String, String, Date)] = [
+            ("5 min", "clock.fill", cal.date(byAdding: .minute, value: 5, to: now)!),
+            ("15 min", "clock.fill", cal.date(byAdding: .minute, value: 15, to: now)!),
+            ("30 min", "clock.fill", cal.date(byAdding: .minute, value: 30, to: now)!),
+            ("1 hour", "clock.fill", cal.date(byAdding: .hour, value: 1, to: now)!),
+            ("Tomorrow 9am", "sunrise.fill", cal.date(byAdding: .day, value: 1, to: cal.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now)!),
+        ]
+        
+        return VStack(spacing: DesignTokens.spacingSM) {
+            HStack {
+                Text(String(localized: "Set Alarm"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textTertiary)
+                    .textCase(.uppercase)
+                Spacer()
+                if alarmSet {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                        Text(String(localized: "Alarm set"))
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(DesignTokens.accentComplete)
+                }
+                Button {
+                    withAnimation(AnimationConstants.springSmooth) {
+                        showAlarmPicker = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DesignTokens.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Quick presets
+            HStack(spacing: DesignTokens.spacingSM) {
+                ForEach(presets.prefix(4), id: \.0) { label, icon, date in
+                    Button {
+                        HapticService.shared.actionButtonTap()
+                        alarmDate = date
+                        scheduleAlarm(at: date)
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: icon)
+                                .font(.system(size: 14))
+                            Text(String(localized: String.LocalizationValue(label)))
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(tint)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(tint.opacity(0.07))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            
+            // Custom picker
+            HStack(spacing: DesignTokens.spacingSM) {
+                DatePicker(
+                    String(localized: "Alarm time"),
+                    selection: $alarmDate,
+                    in: Date()...,
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .tint(tint)
+                .colorScheme(.dark)
+                
+                Button {
+                    HapticService.shared.actionButtonTap()
+                    scheduleAlarm(at: alarmDate)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: alarmSet ? "checkmark.circle.fill" : "alarm.fill")
+                            .font(.system(size: 12))
+                        Text(alarmSet ? String(localized: "Set!") : String(localized: "Set"))
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule().fill(alarmSet ? DesignTokens.accentComplete : tint)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+    
+    private func scheduleAlarm(at date: Date) {
+        Task {
+            let permitted = await NotificationService.shared.requestPermission()
+            if permitted {
+                NotificationService.shared.scheduleAlarm(for: item, at: date)
+                withAnimation(AnimationConstants.springSmooth) {
+                    alarmSet = true
+                }
+                HapticService.shared.swipeDone()
+            } else {
+                HapticService.shared.error()
+                Log.ui.warning("Alarm not scheduled — notification permission denied")
+            }
+        }
+    }
+
     // MARK: - Toolbar
 
     private var toolbar: some View {
@@ -870,6 +1080,12 @@ struct NudgeDetailCard: View {
             toolbarBtn(icon: "moon.zzz.fill", label: String(localized: "Snooze"), color: showSnoozeOptions ? DesignTokens.accentStale : DesignTokens.textSecondary) {
                 withAnimation(AnimationConstants.springSmooth) {
                     showSnoozeOptions.toggle()
+                }
+            }
+            Spacer()
+            toolbarBtn(icon: "alarm.fill", label: String(localized: "Alarm"), color: showAlarmPicker ? Color(hex: "FF9F0A") : DesignTokens.textSecondary) {
+                withAnimation(AnimationConstants.springSmooth) {
+                    showAlarmPicker.toggle()
                 }
             }
             Spacer()
@@ -933,7 +1149,7 @@ struct NudgeDetailCard: View {
         guard microSteps.isEmpty else { return }
         isLoadingSteps = true
         Task {
-            let steps = await MicroStepGenerator.generate(for: item.content, emoji: item.emoji)
+            let steps = await MicroStepGenerator.generate(for: item.content, emoji: item.emoji, category: item.category)
             withAnimation(AnimationConstants.springSmooth) {
                 microSteps = steps
                 isLoadingSteps = false

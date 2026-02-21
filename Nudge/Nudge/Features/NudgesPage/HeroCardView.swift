@@ -12,7 +12,7 @@
 //
 //  Shows:
 //  - Nudgy's reason for picking this task (speech bubble)
-//  - Fish bounty preview (species + snowflakes + streak multiplier)
+//  - Fish bounty preview (species + fish reward + streak multiplier)
 //  - Task content + metadata
 //  - Primary action CTA
 //  - Draft preview (if available)
@@ -35,6 +35,7 @@ struct HeroCardView: View {
     let onAction: () -> Void
     let onFocus: (() -> Void)?
     let onRegenerate: (() -> Void)?
+    var onDetail: (() -> Void)?
     
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging = false
@@ -42,13 +43,37 @@ struct HeroCardView: View {
     @State private var showDoneFlash = false
     @State private var appeared = false
     @State private var cardOpacity: Double = 1.0
-    
+    @State private var cardWidth: CGFloat = 400
+    @State private var hintPhase = false
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     private let swipeThreshold: CGFloat = AnimationConstants.swipeDoneThreshold
     
     private var accentColor: Color {
         AccentColorSystem.shared.color(for: item.accentStatus)
+    }
+    
+    /// Category-aware gradient colors for the card border.
+    /// Warms progressively as tasks age: blue → amber → red.
+    private var categoryGradient: [Color] {
+        // Age-based warmth takes priority for stale/overdue items
+        if let dueDate = item.dueDate, dueDate < Date() {
+            return [DesignTokens.accentOverdue.opacity(0.5), DesignTokens.accentOverdue.opacity(0.15)]
+        }
+        if item.ageInDays >= 7 {
+            return [DesignTokens.accentStale.opacity(0.5), DesignTokens.accentOverdue.opacity(0.2)]
+        }
+        if item.ageInDays >= 3 {
+            return [DesignTokens.accentStale.opacity(0.4), DesignTokens.accentStale.opacity(0.1)]
+        }
+        if item.actionType == nil {
+            let cat = item.resolvedCategory
+            if cat != .general {
+                return cat.gradientColors
+            }
+        }
+        return [accentColor.opacity(0.3), accentColor.opacity(0.1)]
     }
     
     var body: some View {
@@ -96,7 +121,7 @@ struct HeroCardView: View {
             Text("“\(reason)”")
                 .font(AppTheme.nudgyBubbleFont)
                 .foregroundStyle(DesignTokens.textSecondary)
-                .lineLimit(2)
+                .lineLimit(3)
         }
         .padding(.horizontal, DesignTokens.spacingMD)
         .padding(.vertical, DesignTokens.spacingSM)
@@ -131,6 +156,7 @@ struct HeroCardView: View {
                         .font(AppTheme.headline)
                         .foregroundStyle(DesignTokens.textPrimary)
                         .lineLimit(3)
+                        .minimumScaleFactor(0.85)
                         .multilineTextAlignment(.leading)
                     
                     // Contact name
@@ -192,48 +218,122 @@ struct HeroCardView: View {
             RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard)
                 .strokeBorder(
                     LinearGradient(
-                        colors: [accentColor.opacity(0.3), accentColor.opacity(0.1)],
+                        colors: categoryGradient,
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1
+                    lineWidth: 1.5
                 )
         )
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.cornerRadiusCard))
-        .shadow(color: accentColor.opacity(0.08), radius: 20, y: 8)
+        .shadow(color: categoryGradient.first?.opacity(0.10) ?? accentColor.opacity(0.08), radius: 20, y: 8)
+        .overlay {
+            GeometryReader { geo in
+                Color.clear.onAppear { cardWidth = geo.size.width }
+            }
+        }
+        .nudgeAccessibilityElement(
+            label: item.content,
+            hint: String(localized: "Swipe right to mark done, left to snooze"),
+            value: item.isStale ? String(localized: "\(item.ageInDays) days old") : nil
+        )
+        .nudgeAccessibilityAction(name: String(localized: "Mark Done")) { onDone() }
+        .nudgeAccessibilityAction(name: String(localized: "Snooze")) { onSnooze() }
+        .nudgeAccessibilityAction(name: String(localized: "Skip")) { onSkip() }
+        .overlay { swipeDirectionOverlay }
+        .contextMenu {
+            Button {
+                onDetail?()
+            } label: {
+                Label(String(localized: "Open Detail"), systemImage: "arrow.up.left.and.arrow.down.right")
+            }
+            
+            Button {
+                onDone()
+            } label: {
+                Label(String(localized: "Mark Done"), systemImage: "checkmark.circle.fill")
+            }
+            
+            Button {
+                onSnooze()
+            } label: {
+                Label(String(localized: "Snooze 2h"), systemImage: "moon.zzz.fill")
+            }
+            
+            Button {
+                onFocus?()
+            } label: {
+                Label(String(localized: "Start Focus"), systemImage: "timer")
+            }
+            
+            Divider()
+            
+            Button {
+                onSkip()
+            } label: {
+                Label(String(localized: "Skip"), systemImage: "arrow.forward")
+            }
+        }
     }
+    
+
     
     // MARK: - Metadata Row
     
     private var metadataRow: some View {
         HStack(spacing: DesignTokens.spacingSM) {
-            // Duration
-            if let label = item.durationLabel {
-                metadataPill(icon: "clock", text: label)
+            // Category chip (non-action tasks)
+            if item.actionType == nil {
+                let cat = item.resolvedCategory
+                if cat != .general {
+                    CategoryChip(category: cat, small: true)
+                }
             }
             
-            // Due date
-            if let dueDate = item.dueDate {
+            // Priority order: overdue warning > scheduled time > stale badge > due date > duration
+            // Cap at 3 chips total (including category) to reduce visual noise
+            let chipBudget = item.actionType == nil && item.resolvedCategory != .general ? 2 : 3
+            var shown = 0
+            
+            // Due date (overdue gets priority)
+            if shown < chipBudget, let dueDate = item.dueDate {
                 let isPast = dueDate < Date()
                 metadataPill(
                     icon: isPast ? "exclamationmark.triangle.fill" : "calendar",
                     text: dueDateLabel(dueDate),
                     color: isPast ? DesignTokens.accentOverdue : nil
                 )
+                let _ = (shown += 1)
+            }
+            
+            // Scheduled time (shown as "at 2:30 PM" if today/upcoming)
+            if shown < chipBudget, let scheduled = item.scheduledTime {
+                let delta = scheduled.timeIntervalSince(Date())
+                // Show if within next 8 hours or up to 30 min past
+                if delta >= -1800 && delta <= 28800 {
+                    let isNow = abs(delta) < 1800 // within 30 min
+                    metadataPill(
+                        icon: isNow ? "bell.fill" : "clock.fill",
+                        text: scheduled.formatted(.dateTime.hour().minute()),
+                        color: isNow ? DesignTokens.accentActive : nil
+                    )
+                    let _ = (shown += 1)
+                }
             }
             
             // Stale badge
-            if item.isStale {
+            if shown < chipBudget, item.isStale {
                 metadataPill(
                     icon: "exclamationmark.triangle.fill",
                     text: String(localized: "\(item.ageInDays)d old"),
                     color: DesignTokens.accentStale
                 )
+                let _ = (shown += 1)
             }
             
-            // Energy level
-            if let energy = item.energyLevel {
-                metadataPill(icon: energy.icon, text: energy.label)
+            // Duration
+            if shown < chipBudget, let label = item.durationLabel {
+                metadataPill(icon: "clock", text: label)
             }
         }
     }
@@ -256,44 +356,106 @@ struct HeroCardView: View {
     
     private func dueDateLabel(_ date: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return String(localized: "Today") }
+        let now = Date()
+        if date < now { return String(localized: "Overdue") }
+        if calendar.isDateInToday(date) {
+            let secondsLeft = date.timeIntervalSince(now)
+            let hoursLeft = Int(secondsLeft / 3600)
+            let minutesLeft = Int(secondsLeft / 60) % 60
+            if hoursLeft >= 1 {
+                return String(localized: "in \(hoursLeft)h")
+            } else if minutesLeft > 0 {
+                return String(localized: "in \(minutesLeft)m")
+            }
+            return String(localized: "Now")
+        }
         if calendar.isDateInTomorrow(date) { return String(localized: "Tomorrow") }
-        if date < Date() { return String(localized: "Overdue") }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: date)
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
     
     // MARK: - Swipe Hint
-    
+
     private var swipeHint: some View {
         HStack {
-            Spacer()
-            HStack(spacing: DesignTokens.spacingXL) {
-                HStack(spacing: 4) {
-                    Text(String(localized: "Swipe"))
-                        .font(AppTheme.caption)
-                        .foregroundStyle(DesignTokens.textTertiary)
-                    Image(systemName: "arrow.right")
-                        .font(AppTheme.captionBold)
-                        .foregroundStyle(DesignTokens.accentComplete.opacity(0.5))
-                    Text(String(localized: "done"))
-                        .font(AppTheme.caption)
-                        .foregroundStyle(DesignTokens.accentComplete.opacity(0.5))
-                }
-                
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.left")
-                        .font(AppTheme.captionBold)
-                        .foregroundStyle(DesignTokens.accentStale.opacity(0.5))
-                    Text(String(localized: "snooze"))
-                        .font(AppTheme.caption)
-                        .foregroundStyle(DesignTokens.accentStale.opacity(0.5))
-                }
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 9, weight: .bold))
+                    .offset(x: hintPhase ? -2 : 0)
+                    .animation(
+                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true).delay(0.3),
+                        value: hintPhase
+                    )
+                Text(String(localized: "snooze"))
             }
+            .font(AppTheme.caption)
+            .foregroundStyle(DesignTokens.accentStale.opacity(0.45))
+
             Spacer()
+
+            HStack(spacing: 4) {
+                Text(String(localized: "done"))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .offset(x: hintPhase ? 2 : 0)
+                    .animation(
+                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                        value: hintPhase
+                    )
+            }
+            .font(AppTheme.caption)
+            .foregroundStyle(DesignTokens.accentComplete.opacity(0.45))
         }
         .padding(.top, DesignTokens.spacingXS)
+        .opacity(abs(dragOffset) < 15 ? 1 : max(0, 1.0 - Double(abs(dragOffset)) / 50.0))
+        .accessibilityHidden(true)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                withAnimation { hintPhase = true }
+            }
+        }
+    }
+
+    // MARK: - Swipe Direction Overlay
+
+    /// Tints the card green/amber and reveals a ✓ or 🌙 icon as the user drags.
+    private var swipeDirectionOverlay: some View {
+        ZStack {
+            // Green tint — right swipe (done)
+            RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard)
+                .fill(DesignTokens.accentComplete.opacity(
+                    dragOffset > 0 ? min(0.22, Double(dragOffset / swipeThreshold) * 0.22) : 0
+                ))
+            // Amber tint — left swipe (snooze)
+            RoundedRectangle(cornerRadius: DesignTokens.cornerRadiusCard)
+                .fill(DesignTokens.accentStale.opacity(
+                    dragOffset < 0 ? min(0.22, Double(-dragOffset / swipeThreshold) * 0.22) : 0
+                ))
+            // Done checkmark (right edge)
+            HStack {
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(DesignTokens.accentComplete)
+                    .opacity(dragOffset > 15 ? min(0.92, Double(dragOffset / swipeThreshold) * 0.92) : 0)
+                    .scaleEffect(dragOffset > 15
+                        ? CGFloat(0.45 + min(0.6, Double(dragOffset / swipeThreshold) * 0.6))
+                        : 0.45)
+                    .padding(.trailing, DesignTokens.spacingXL)
+            }
+            // Snooze icon (left edge)
+            HStack {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(DesignTokens.accentStale)
+                    .opacity(dragOffset < -15 ? min(0.92, Double(-dragOffset / swipeThreshold) * 0.92) : 0)
+                    .scaleEffect(dragOffset < -15
+                        ? CGFloat(0.45 + min(0.6, Double(-dragOffset / swipeThreshold) * 0.6))
+                        : 0.45)
+                    .padding(.leading, DesignTokens.spacingXL)
+                Spacer()
+            }
+        }
+        .allowsHitTesting(false)
     }
     
     // MARK: - Swipe Gesture
@@ -335,7 +497,7 @@ struct HeroCardView: View {
                 let isSwipeRight = translation > swipeThreshold || (translation > 40 && predictedEnd > swipeThreshold * 2)
                 let isSwipeLeft = translation < -swipeThreshold || (translation < -40 && predictedEnd < -swipeThreshold * 2)
                 
-                let screenWidth = UIScreen.main.bounds.width
+                let screenWidth = cardWidth
                 
                 if isSwipeRight {
                     // Swipe right → Done
@@ -345,7 +507,7 @@ struct HeroCardView: View {
                         cardOpacity = 0
                         showDoneFlash = true
                     }
-                    HapticService.shared.swipeDone()
+                    HapticService.shared.completionHaptic(for: item.resolvedCategory)
                     Task { @MainActor in
                         try? await Task.sleep(for: .seconds(0.3))
                         onDone()

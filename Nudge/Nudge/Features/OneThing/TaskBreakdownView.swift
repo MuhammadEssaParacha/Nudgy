@@ -153,8 +153,9 @@ struct TaskBreakdownView: View {
                 
                 // Encouragement
                 HStack(spacing: DesignTokens.spacingSM) {
-                    Text("🐧")
-                        .font(.system(size: 20))
+                    Image(systemName: "pawprint.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accentComplete)
                     
                     Text(breakdown.encouragement)
                         .font(AppTheme.body.italic())

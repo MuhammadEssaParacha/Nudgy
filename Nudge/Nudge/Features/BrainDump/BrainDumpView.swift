@@ -256,6 +256,16 @@ struct BrainDumpView: View {
                         )
                 )
                 .focused($textFieldFocused)
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button(String(localized: "Done")) {
+                            textFieldFocused = false
+                        }
+                        .font(AppTheme.body.weight(.semibold))
+                        .foregroundStyle(DesignTokens.accentActive)
+                    }
+                }
                 .overlay(alignment: .topLeading) {
                     if typedText.isEmpty {
                         Text(String(localized: "Unload everything on your mind...\ne.g. \"Call dentist tomorrow, pay rent by the 5th, text Sarah about dinner tonight, maybe get car washed\""))
@@ -292,7 +302,7 @@ struct BrainDumpView: View {
                 )
             }
             .buttonStyle(.plain)
-            .disabled(typedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(typedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.phase.tag == "processing")
         }
         .padding(.horizontal, DesignTokens.spacingXL)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -339,7 +349,6 @@ struct BrainDumpView: View {
                 }
             }
         }
-        .sensoryFeedback(.impact(flexibility: .solid), trigger: viewModel.isRecording)
         .nudgeAccessibility(
             label: viewModel.isRecording
                 ? String(localized: "Stop recording")
@@ -369,6 +378,9 @@ struct BrainDumpView: View {
                 .font(AppTheme.headline)
                 .foregroundStyle(DesignTokens.textPrimary)
             
+            // Phase 14: Category distribution strip — proportional colored bar
+            categoryDistributionStrip
+            
             ScrollView {
                 VStack(spacing: DesignTokens.spacingMD) {
                     ForEach(Array(viewModel.editableTasks.enumerated()), id: \.element.id) { index, task in
@@ -378,6 +390,10 @@ struct BrainDumpView: View {
                                     insertion: .opacity.combined(with: .move(edge: .bottom)),
                                     removal: .opacity
                                 )
+                            )
+                            .animation(
+                                AnimationConstants.cardAppear.delay(Double(index) * AnimationConstants.cardStaggerDelay),
+                                value: viewModel.editableTasks.count
                             )
                     }
                 }
@@ -420,6 +436,7 @@ struct BrainDumpView: View {
             HStack(spacing: DesignTokens.spacingMD) {
                 // Inclusion toggle
                 Button {
+                    HapticService.shared.snoozeTimeSelected()
                     viewModel.toggleTaskInclusion(id: task.id)
                 } label: {
                     Image(systemName: task.isIncluded ? "checkmark.circle.fill" : "circle")
@@ -473,12 +490,77 @@ struct BrainDumpView: View {
                         .font(AppTheme.caption)
                         .foregroundStyle(DesignTokens.accentActive)
                     }
+                    
+                    // Category chip (pre-classified during extraction)
+                    if let cat = task.category, cat != .general {
+                        CategoryChip(category: cat, small: true)
+                    }
                 }
                 
                 Spacer()
             }
         }
         .opacity(task.isIncluded ? 1.0 : 0.5)
+    }
+    
+    // MARK: - Category Distribution Strip (Phase 14)
+    
+    /// Proportional colored bar showing category distribution of extracted tasks.
+    private var categoryDistributionStrip: some View {
+        let included = viewModel.editableTasks.filter(\.isIncluded)
+        let catCounts: [(category: TaskCategory, count: Int)] = {
+            var counts: [TaskCategory: Int] = [:]
+            for task in included {
+                let cat = task.category ?? .general
+                counts[cat, default: 0] += 1
+            }
+            return counts
+                .map { (category: $0.key, count: $0.value) }
+                .sorted { $0.count > $1.count }
+        }()
+        let total = max(included.count, 1)
+        
+        return Group {
+            if catCounts.count > 1 || (catCounts.first?.category != .general) {
+                VStack(spacing: DesignTokens.spacingSM) {
+                    // Proportional bar
+                    GeometryReader { geo in
+                        HStack(spacing: 1) {
+                            ForEach(catCounts, id: \.category) { stat in
+                                let fraction = CGFloat(stat.count) / CGFloat(total)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: stat.category.gradientColors,
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: max(geo.size.width * fraction, 4))
+                            }
+                        }
+                    }
+                    .frame(height: 6)
+                    .clipShape(Capsule())
+                    
+                    // Emoji legend row
+                    HStack(spacing: DesignTokens.spacingSM) {
+                        ForEach(catCounts.prefix(5), id: \.category) { stat in
+                            HStack(spacing: 2) {
+                                Image(systemName: stat.category.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(stat.category.primaryColor)
+                                Text("\(stat.count)")
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(stat.category.primaryColor)
+                            }
+                        }
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, DesignTokens.spacingLG)
+            }
+        }
     }
     
     // MARK: - Penguin State Wiring
@@ -500,6 +582,7 @@ struct BrainDumpView: View {
             penguinState.startProcessing()
             
         case .results(let tasks):
+            HapticService.shared.shareSaved()
             penguinState.showResults(taskCount: tasks.count)
             
         case .error:
@@ -562,12 +645,18 @@ struct BrainDumpView: View {
                 .padding(.horizontal, DesignTokens.spacingXL)
             
             Button {
+                HapticService.shared.actionButtonTap()
                 viewModel.reset()
             } label: {
                 Text(String(localized: "Try Again"))
                     .accentButtonStyle()
             }
             .buttonStyle(.plain)
+            .nudgeAccessibility(
+                label: String(localized: "Try Again"),
+                hint: String(localized: "Start a new brain unload"),
+                traits: .isButton
+            )
         }
     }
 }
