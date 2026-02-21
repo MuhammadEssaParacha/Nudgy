@@ -10,7 +10,7 @@
 //    Log.ai.debug("Token count: \(tokens)")
 //    Log.data.error("Failed to save: \(error)")
 //
-//  Filter in Console.app:  subsystem:com.tarsitgroup.nudge  category:ai
+//  Filter in Console.app:  subsystem:com.essaparacha.nudge  category:ai
 //
 
 import os
@@ -20,7 +20,7 @@ import os
 /// In release builds, `.debug` messages are suppressed automatically by the OS.
 nonisolated enum Log {
     
-    private static let subsystem = "com.tarsitgroup.nudge"
+    private static let subsystem = "com.essaparacha.nudge"
     
     // MARK: - App Lifecycle
     

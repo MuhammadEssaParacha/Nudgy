@@ -92,7 +92,7 @@ struct WidgetMarkDoneIntent: AppIntent {
     init(taskID: String) { self.taskID = taskID }
     
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: "group.com.tarsitgroup.nudge")
+        let defaults = UserDefaults(suiteName: "group.com.essaparacha.nudge")
         defaults?.set(taskID, forKey: "widget_pendingDoneTaskID")
         defaults?.set(Date().timeIntervalSince1970, forKey: "widget_pendingDoneTimestamp")
         WidgetCenter.shared.reloadAllTimelines()
@@ -112,7 +112,7 @@ struct WidgetSkipIntent: AppIntent {
     init(taskID: String) { self.taskID = taskID }
     
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: "group.com.tarsitgroup.nudge")
+        let defaults = UserDefaults(suiteName: "group.com.essaparacha.nudge")
         defaults?.set(taskID, forKey: "widget_pendingSkipTaskID")
         defaults?.set(Date().timeIntervalSince1970, forKey: "widget_pendingSkipTimestamp")
         WidgetCenter.shared.reloadAllTimelines()

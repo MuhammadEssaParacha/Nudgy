@@ -63,7 +63,7 @@ final class HealthService {
     // MARK: - Private
     
     private let store = HKHealthStore()
-    private let log = Logger(subsystem: "com.tarsitgroup.nudge", category: "Health")
+    private let log = Logger(subsystem: "com.essaparacha.nudge", category: "Health")
     
     /// Types we want to read
     private var readTypes: Set<HKObjectType> {
@@ -133,10 +133,10 @@ final class HealthService {
         
         var metadata: [String: Any] = [
             HKMetadataKeyExternalUUID: UUID().uuidString,
-            "com.tarsitgroup.nudge.source": "focus_timer"
+            "com.essaparacha.nudge.source": "focus_timer"
         ]
         if let taskContent {
-            metadata["com.tarsitgroup.nudge.task"] = String(taskContent.prefix(100))
+            metadata["com.essaparacha.nudge.task"] = String(taskContent.prefix(100))
         }
         
         let sample = HKCategorySample(

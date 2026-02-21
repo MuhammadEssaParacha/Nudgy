@@ -53,7 +53,7 @@ final class LocationService: NSObject {
     
     private let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
-    private let log = Logger(subsystem: "com.tarsitgroup.nudge", category: "Location")
+    private let log = Logger(subsystem: "com.essaparacha.nudge", category: "Location")
     
     /// Maximum geofences iOS allows per app (system limit is 20)
     private let maxGeofences = 20

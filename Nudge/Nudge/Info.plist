@@ -9,8 +9,8 @@
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>com.tarsitgroup.nudge.liveActivityRefresh</string>
-		<string>com.tarsitgroup.nudge.smartReorder</string>
+		<string>com.essaparacha.nudge.liveActivityRefresh</string>
+		<string>com.essaparacha.nudge.smartReorder</string>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Nudge uses the microphone so you can brain dump your thoughts by speaking instead of typing.</string>
@@ -30,9 +30,9 @@
 	<string>Nudge records your focus timer sessions as Mindful Minutes in Apple Health so you can track your productivity.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
-		<string>com.tarsitgroup.nudge.viewTask</string>
-		<string>com.tarsitgroup.nudge.browseQueue</string>
-		<string>com.tarsitgroup.nudge.brainDump</string>
+		<string>com.essaparacha.nudge.viewTask</string>
+		<string>com.essaparacha.nudge.browseQueue</string>
+		<string>com.essaparacha.nudge.brainDump</string>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
@@ -40,7 +40,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.tarsitgroup.nudge</string>
+			<string>com.essaparacha.nudge</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>nudge</string>

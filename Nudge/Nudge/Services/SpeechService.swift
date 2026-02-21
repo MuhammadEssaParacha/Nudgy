@@ -10,7 +10,7 @@ import Speech
 import AVFoundation
 import os.log
 
-private let speechLog = Logger(subsystem: "com.tarsitgroup.nudge", category: "SpeechService")
+private let speechLog = Logger(subsystem: "com.essaparacha.nudge", category: "SpeechService")
 
 /// Wraps Apple's SFSpeechRecognizer for on-device voice recognition.
 @MainActor @Observable

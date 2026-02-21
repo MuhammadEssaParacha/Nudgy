@@ -66,10 +66,10 @@ struct NudgeApp: App {
             .environment(penguinState)
             .environment(authSession)
         }
-        .backgroundTask(.appRefresh("com.tarsitgroup.nudge.liveActivityRefresh")) {
+        .backgroundTask(.appRefresh("com.essaparacha.nudge.liveActivityRefresh")) {
             await self.handleLiveActivityRefresh()
         }
-        .backgroundTask(.appRefresh("com.tarsitgroup.nudge.smartReorder")) {
+        .backgroundTask(.appRefresh("com.essaparacha.nudge.smartReorder")) {
             await self.handleSmartReorder()
         }
     }
@@ -220,7 +220,7 @@ struct NudgeApp: App {
     
     /// Schedule a background app refresh for Live Activity time-of-day gradient updates.
     private func scheduleLiveActivityRefresh() {
-        let request = BGAppRefreshTaskRequest(identifier: "com.tarsitgroup.nudge.liveActivityRefresh")
+        let request = BGAppRefreshTaskRequest(identifier: "com.essaparacha.nudge.liveActivityRefresh")
         // Schedule for next time-of-day transition
         request.earliestBeginDate = Date(timeIntervalSinceNow: 3600) // ~1 hour
         
@@ -268,7 +268,7 @@ struct NudgeApp: App {
     /// Schedule overnight smart reorder — reorders tasks by priority, staleness,
     /// due dates, and energy levels so the morning queue is optimized.
     private func scheduleSmartReorder() {
-        let request = BGAppRefreshTaskRequest(identifier: "com.tarsitgroup.nudge.smartReorder")
+        let request = BGAppRefreshTaskRequest(identifier: "com.essaparacha.nudge.smartReorder")
         // Schedule for early morning (5am-ish)
         let calendar = Calendar.current
         var components = calendar.dateComponents([.year, .month, .day], from: Date())

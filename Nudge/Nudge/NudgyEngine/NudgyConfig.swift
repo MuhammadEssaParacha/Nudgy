@@ -150,7 +150,7 @@ nonisolated enum NudgyConfig {
         static let retentionDays = 30
         
         /// App Group identifier for shared storage.
-        static let appGroup = "group.com.tarsitgroup.nudge"
+        static let appGroup = "group.com.essaparacha.nudge"
         
         /// UserDefaults key for memory store.
         static let memoryKey = "nudgyConversationMemory"

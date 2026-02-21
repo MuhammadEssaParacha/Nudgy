@@ -56,7 +56,7 @@ struct NudgeFocusFilter: SetFocusFilterIntent {
     
     func perform() async throws -> some IntentResult {
         // Store the active filter in shared UserDefaults
-        let defaults = UserDefaults(suiteName: "group.com.tarsitgroup.nudge")
+        let defaults = UserDefaults(suiteName: "group.com.essaparacha.nudge")
         defaults?.set(energyFilter.rawValue, forKey: "focusFilter_energyLevel")
         defaults?.set(silenceNotifications, forKey: "focusFilter_silenceNotifications")
         

@@ -11,7 +11,7 @@ import SwiftData
 import SwiftUI
 import os.log
 
-private let routineLog = Logger(subsystem: "com.tarsitgroup.nudge", category: "RoutineService")
+private let routineLog = Logger(subsystem: "com.essaparacha.nudge", category: "RoutineService")
 
 @MainActor
 enum RoutineService {

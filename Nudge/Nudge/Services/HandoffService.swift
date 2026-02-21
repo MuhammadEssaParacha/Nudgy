@@ -19,11 +19,11 @@ enum HandoffService {
     // MARK: - Activity Types
     
     /// Viewing a specific task
-    static let viewTaskActivity = "com.tarsitgroup.nudge.viewTask"
+    static let viewTaskActivity = "com.essaparacha.nudge.viewTask"
     /// Browsing the task queue
-    static let browseQueueActivity = "com.tarsitgroup.nudge.browseQueue"
+    static let browseQueueActivity = "com.essaparacha.nudge.browseQueue"
     /// Brain dump session
-    static let brainDumpActivity = "com.tarsitgroup.nudge.brainDump"
+    static let brainDumpActivity = "com.essaparacha.nudge.brainDump"
     
     // MARK: - Create Activities
     

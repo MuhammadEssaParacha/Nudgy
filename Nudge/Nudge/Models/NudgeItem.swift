@@ -544,7 +544,7 @@ extension NudgeItem: Transferable {
 }
 
 extension UTType {
-    static let nudgeTask = UTType(exportedAs: "com.tarsitgroup.nudge.task")
+    static let nudgeTask = UTType(exportedAs: "com.essaparacha.nudge.task")
 }
 
 // MARK: - Energy Level

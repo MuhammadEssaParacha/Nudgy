@@ -235,6 +235,19 @@ final class AppSettings {
         }
     }
 
+    var selectedPersona: UserPersona {
+        get {
+            access(keyPath: \.selectedPersona)
+            let raw = UserDefaults.standard.string(forKey: scopedKey("selectedPersona")) ?? UserPersona.adhd.rawValue
+            return UserPersona(rawValue: raw) ?? .adhd
+        }
+        set {
+            withMutation(keyPath: \.selectedPersona) {
+                UserDefaults.standard.set(newValue.rawValue, forKey: scopedKey("selectedPersona"))
+            }
+        }
+    }
+
     var hasCompletedADHDProfile: Bool {
         get { access(keyPath: \.hasCompletedADHDProfile); return UserDefaults.standard.bool(forKey: scopedKey("hasCompletedADHDProfile")) }
         set { withMutation(keyPath: \.hasCompletedADHDProfile) { UserDefaults.standard.set(newValue, forKey: scopedKey("hasCompletedADHDProfile")) } }

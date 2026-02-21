@@ -17,7 +17,7 @@ import os
 /// Indexes NudgeItem tasks in Core Spotlight for system search.
 enum SpotlightIndexer {
     
-    private static let domainIdentifier = "com.tarsitgroup.nudge.tasks"
+    private static let domainIdentifier = "com.essaparacha.nudge.tasks"
     
     /// Index all active tasks. Replaces any previous index.
     @MainActor

@@ -17,7 +17,7 @@ import WidgetKit
 /// A Control Center button that opens Nudge's quick-add flow.
 @available(iOS 18.0, *)
 struct NudgeQuickAddControl: ControlWidget {
-    static let kind = "com.tarsitgroup.nudge.control.quickAdd"
+    static let kind = "com.essaparacha.nudge.control.quickAdd"
     
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
@@ -50,7 +50,7 @@ struct QuickAddControlIntent: ControlConfigurationIntent {
 /// A Control Center button that shows active task count and opens Nudge.
 @available(iOS 18.0, *)
 struct NudgeTaskCountControl: ControlWidget {
-    static let kind = "com.tarsitgroup.nudge.control.taskCount"
+    static let kind = "com.essaparacha.nudge.control.taskCount"
     
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
@@ -64,7 +64,7 @@ struct NudgeTaskCountControl: ControlWidget {
     }
     
     private static func readActiveCount() -> Int {
-        let defaults = UserDefaults(suiteName: "group.com.tarsitgroup.nudge")
+        let defaults = UserDefaults(suiteName: "group.com.essaparacha.nudge")
         return defaults?.integer(forKey: "widget_activeCount") ?? 0
     }
 }
@@ -88,7 +88,7 @@ struct OpenNudgesControlIntent: ControlConfigurationIntent {
 /// A Control Center button that opens brain dump.
 @available(iOS 18.0, *)
 struct NudgeBrainDumpControl: ControlWidget {
-    static let kind = "com.tarsitgroup.nudge.control.brainDump"
+    static let kind = "com.essaparacha.nudge.control.brainDump"
     
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {

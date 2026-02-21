@@ -129,7 +129,7 @@ struct NudgeWidgetProvider: TimelineProvider {
     /// Read task data from the shared App Group UserDefaults.
     /// The main app writes this data on every refresh via `syncWidgetData()`.
     private func readCurrentEntry() -> NudgeWidgetEntry {
-        guard let defaults = UserDefaults(suiteName: "group.com.tarsitgroup.nudge") else {
+        guard let defaults = UserDefaults(suiteName: "group.com.essaparacha.nudge") else {
             return .empty
         }
         

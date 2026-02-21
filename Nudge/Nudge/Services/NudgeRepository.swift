@@ -581,6 +581,6 @@ struct ShareExtensionPayload: Codable {
 // MARK: - App Group Constants
 
 enum AppGroupID {
-    static let suiteName = "group.com.tarsitgroup.nudge"
+    static let suiteName = "group.com.essaparacha.nudge"
     static let pendingItemsKey = "pendingShareItems"
 }

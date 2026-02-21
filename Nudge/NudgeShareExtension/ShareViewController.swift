@@ -105,7 +105,7 @@ class ShareViewController: UIViewController {
     // MARK: - Save
     
     private func saveAndDismiss(content: SharedContent, snoozedUntil: Date, category: String?) {
-        guard let defaults = UserDefaults(suiteName: "group.com.tarsitgroup.nudge") else {
+        guard let defaults = UserDefaults(suiteName: "group.com.essaparacha.nudge") else {
             cancel()
             return
         }

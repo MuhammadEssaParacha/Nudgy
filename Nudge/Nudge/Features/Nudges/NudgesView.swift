@@ -17,7 +17,7 @@ import SwiftData
 import WidgetKit
 import os.log
 
-private let nudgesLog = Logger(subsystem: "com.tarsitgroup.nudge", category: "NudgesView")
+private let nudgesLog = Logger(subsystem: "com.essaparacha.nudge", category: "NudgesView")
 
 struct NudgesView: View {
 
@@ -1160,7 +1160,7 @@ struct NudgesView: View {
     /// Apply Focus Filter energy level (set by iOS Focus modes via NudgeFocusFilter).
     /// Tasks without an energy level are always shown (they haven't been classified).
     private func applyFocusFilter(_ items: [NudgeItem]) -> [NudgeItem] {
-        let defaults = UserDefaults(suiteName: "group.com.tarsitgroup.nudge")
+        let defaults = UserDefaults(suiteName: "group.com.essaparacha.nudge")
         var filtered = items
         
         // Energy filter

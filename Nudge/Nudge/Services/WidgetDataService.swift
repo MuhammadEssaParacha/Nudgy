@@ -14,7 +14,7 @@ import os
 @MainActor
 enum WidgetDataService {
     
-    private static let log = Logger(subsystem: "com.tarsitgroup.nudge", category: "WidgetData")
+    private static let log = Logger(subsystem: "com.essaparacha.nudge", category: "WidgetData")
     
     // MARK: - Sync Widget Data
     

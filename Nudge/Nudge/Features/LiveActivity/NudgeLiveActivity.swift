@@ -11,7 +11,7 @@ import SwiftUI
 import WidgetKit
 import os.log
 
-private let liveActivityLog = Logger(subsystem: "com.tarsitgroup.nudge", category: "LiveActivity")
+private let liveActivityLog = Logger(subsystem: "com.essaparacha.nudge", category: "LiveActivity")
 
 // MARK: - Activity Attributes
 
