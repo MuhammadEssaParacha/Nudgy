@@ -53,4 +53,4 @@ Rationale:
 ## Build Info
 - Simulator: `80F84FEC-B3C7-400C-8F73-8A3D888A5A0E` (iPhone 17 Pro, iOS 26.2)
 - Build: `cd "/Users/abdullahimran/Desktop/untitled folder/Nudge" && xcodebuild -scheme Nudge -destination 'platform=iOS Simulator,id=80F84FEC-B3C7-400C-8F73-8A3D888A5A0E' build 2>&1 | tail -5`
-- Deploy: `xcrun simctl terminate 80F84FEC-B3C7-400C-8F73-8A3D888A5A0E com.tarsitgroup.nudge 2>/dev/null; xcrun simctl install 80F84FEC-B3C7-400C-8F73-8A3D888A5A0E ~/Library/Developer/Xcode/DerivedData/Nudge-hiursflqkxedchggqbbxpgjdebru/Build/Products/Debug-iphonesimulator/Nudge.app && xcrun simctl launch 80F84FEC-B3C7-400C-8F73-8A3D888A5A0E com.tarsitgroup.nudge -skipAuth -seedTasks`
+- Deploy: `xcrun simctl terminate 80F84FEC-B3C7-400C-8F73-8A3D888A5A0E com.essaparacha.nudge 2>/dev/null; xcrun simctl install 80F84FEC-B3C7-400C-8F73-8A3D888A5A0E ~/Library/Developer/Xcode/DerivedData/Nudge-hiursflqkxedchggqbbxpgjdebru/Build/Products/Debug-iphonesimulator/Nudge.app && xcrun simctl launch 80F84FEC-B3C7-400C-8F73-8A3D888A5A0E com.essaparacha.nudge -skipAuth -seedTasks`
